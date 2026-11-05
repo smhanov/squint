@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -272,7 +273,7 @@ func TestVersionProbe(t *testing.T) {
 func TestRunner(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		gitPath(t)
-		out, err := NewRunner("").Run("--version")
+		out, err := NewRunner("").Run(context.Background(), "--version")
 		if err != nil {
 			t.Fatalf("Run(--version) failed: %v", err)
 		}
@@ -283,7 +284,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("GitError", func(t *testing.T) {
 		root := initRepo(t)
-		_, err := NewRunner(root).Run("rev-parse", "--verify", "no-such-ref")
+		_, err := NewRunner(root).Run(context.Background(), "rev-parse", "--verify", "no-such-ref")
 		var gitErr *GitError
 		if !errors.As(err, &gitErr) {
 			t.Fatalf("error = %T (%v), want *GitError", err, err)

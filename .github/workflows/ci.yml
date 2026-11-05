@@ -30,6 +30,16 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Read-only git gate
+        # squint never mutates a repository: the only git subcommands
+        # internal/git may invoke are the read-only ones. The gate greps
+        # production code for mutating subcommand tokens (quoted, as exec
+        # arguments); test files and the testfixture builder are exempt —
+        # fixtures must build repositories.
+        shell: bash
+        run: |
+          ! grep -rnE '"(commit|add|checkout|reset|push|pull|rebase|merge|tag|branch|stash|rm|mv|clean|init|clone|config|gc|prune|cherry-pick|revert|apply|am|bisect|worktree|submodule|notes|replace|restore|switch)"' internal/git --include='*.go' --exclude='*_test.go' --exclude-dir=testfixture
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest

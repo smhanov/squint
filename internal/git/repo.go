@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -181,6 +182,22 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// IsShallow reports whether the repository is a shallow clone (its git
+// directory contains a shallow file). Linked worktrees keep the flag in
+// the common directory.
+func (r *Repo) IsShallow() bool {
+	dirs := []string{r.GitDir}
+	if common, ok := readCommonDir(r.GitDir); ok {
+		dirs = append(dirs, common)
+	}
+	for _, dir := range dirs {
+		if fileExists(filepath.Join(dir, "shallow")) {
+			return true
+		}
+	}
+	return false
+}
+
 // VersionInfo is the probed git release.
 type VersionInfo struct {
 	// Raw is the verbatim first line of `git --version`.
@@ -199,7 +216,7 @@ func (v VersionInfo) AtLeast(major, minor int) bool {
 // anywhere in the output, tolerating vendor suffixes such as
 // "2.39.2 (Apple Git-143)".
 func Version() (VersionInfo, error) {
-	out, err := NewRunner("").Run("--version")
+	out, err := NewRunner("").Run(context.Background(), "--version")
 	if err != nil {
 		return VersionInfo{}, err
 	}
