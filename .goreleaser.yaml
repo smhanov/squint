@@ -1,0 +1,68 @@
+# GoReleaser configuration (spec §15, NFR-6): static binaries for macOS
+# (amd64/arm64), Linux (amd64/arm64), and Windows (amd64/arm64).
+# CGO_ENABLED=0 keeps every artifact a self-contained static binary; the
+# Linux builds are static and therefore run unchanged on both glibc and
+# musl systems. Homebrew tap and scoop bucket manifests are updated from
+# the release, and `go install` works from the tagged module.
+version: 2
+
+project_name: squint
+
+builds:
+  - id: squint
+    builder: go
+    main: ./cmd/squint
+    binary: squint
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: squint
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+homebrew_casks:
+  - repository:
+      owner: squint-tui
+      name: homebrew-tap
+    homepage: "https://github.com/squint-tui/squint"
+    description: "Review what your LLM just committed, in a terminal UI"
+    license: MIT
+    binaries:
+      - squint
+
+scoops:
+  - repository:
+      owner: squint-tui
+      name: scoop-bucket
+    homepage: "https://github.com/squint-tui/squint"
+    description: "Review what your LLM just committed, in a terminal UI"
+    license: MIT

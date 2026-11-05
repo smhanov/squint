@@ -856,7 +856,7 @@ func TestCursorMovement(t *testing.T) {
 func TestUnboundKeysInert(t *testing.T) {
 	h := newHarness(t, testfixture.Basic)
 	before := h.app.gen
-	for _, k := range []string{"x", "s", "i", "z", "y", "n", "/", "p"} {
+	for _, k := range []string{"x", "n", "/", "X", "D", "m", "v"} {
 		h.press(k)
 	}
 	if h.app.gen != before {

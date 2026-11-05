@@ -16,15 +16,20 @@ import (
 
 // detail.go is the message + diff pane: the header block (subject, author,
 // relative and absolute time, full body) followed by one section per
-// changed file with its hunks. While rendering it records a fileSpan row
-// index per file (spec §17.5: build the index during render), which
-// drives file jumps and the files-pane enter key (FR-4).
+// changed file with its hunks. It also carries the since-diff mode (FR-10)
+// and the viewer options: unified or side-by-side (FR-6), syntax
+// highlighting (FR-7), intraline word-diff (FR-8), wrap, context,
+// ignore-whitespace, and horizontal scroll. While rendering it records a
+// fileSpan row index per file (spec §17.5: build the index during
+// render), which drives file jumps and the files-pane enter key (FR-4).
 
 // diffContextDefault is git's default context size; the + and - keys move
 // it within 0–10.
 const (
 	diffContextDefault = 3
 	diffContextMax     = 10
+	// hScrollStep is the number of columns h/l shift the diff body.
+	hScrollStep = 4
 )
 
 // wrapMode is the wrap cycle of the detail pane: none → word → character.
@@ -54,6 +59,20 @@ type fileSpan struct {
 	start, end int
 }
 
+// sinceView holds the since-diff (FR-10): the cumulative diff from the
+// selected commit's first parent to HEAD. on selects the mode; forHash
+// records the selection the loaded range belongs to.
+type sinceView struct {
+	on      bool
+	forHash string
+	base    string
+	// count is the number of commits in base..HEAD; -1 when unknown
+	// (the count read failed).
+	count int
+	diffs []diff.FileDiff
+	err   string
+}
+
 // detailPane holds the detail pane state. hash is the commit whose diff is
 // loaded; dirtyOpts marks a refetch whose viewer options differ from the
 // rendered content (its result was requested but not yet landed).
@@ -65,9 +84,14 @@ type detailPane struct {
 	err       string
 	dirtyOpts bool
 
-	context  int
-	ignoreWS bool
-	wrap     wrapMode
+	context    int
+	ignoreWS   bool
+	wrap       wrapMode
+	sideBySide bool // s: two columns, old left of new (FR-6)
+	wordDiff   bool // i: intraline word-diff (FR-8)
+	scrollX    int  // horizontal scroll in columns (wrap off)
+
+	since sinceView
 
 	view     ui.Scroller
 	spans    []fileSpan
@@ -96,6 +120,11 @@ func (d *detailPane) dropContent() {
 	d.view.Top()
 }
 
+// dropSince exits since-diff mode and clears its content.
+func (d *detailPane) dropSince() {
+	d.since = sinceView{}
+}
+
 // reset clears everything; used when the repository has no commits.
 func (d *detailPane) reset() {
 	d.commit = git.Commit{}
@@ -106,6 +135,7 @@ func (d *detailPane) reset() {
 	d.spans = nil
 	d.hunkRows = nil
 	d.row = 0
+	d.since = sinceView{}
 	d.view.SetLines(nil)
 	d.view.Top()
 }
@@ -126,6 +156,25 @@ func (d *detailPane) apply(hash string, diffs []diff.FileDiff, err error) {
 	d.hash = hash
 	d.dirtyOpts = false
 	d.diffs = diffs
+}
+
+// applySince stores a landed since-diff for the selection.
+func (d *detailPane) applySince(hash, base string, count int, diffs []diff.FileDiff, err error) {
+	d.dirtyOpts = false
+	if err != nil {
+		d.since.forHash = hash
+		d.since.err = err.Error()
+		return
+	}
+	if hash != d.since.forHash {
+		d.view.Top()
+		d.row = 0
+	}
+	d.since.forHash = hash
+	d.since.base = base
+	d.since.count = count
+	d.since.err = ""
+	d.since.diffs = diffs
 }
 
 // jumpTo moves the logical navigation row and scrolls the viewport there
@@ -212,16 +261,22 @@ type detailEnv struct {
 	loading bool
 }
 
-// rebuild renders the whole detail content: header block, per-file diff
-// sections, and the span/hunk row index. Called from Update so View stays
-// pure.
+// rebuild renders the whole detail content: header block (or the
+// since-diff banner), per-file diff sections, and the span/hunk row
+// index. Called from Update so View stays pure.
 func (d *detailPane) rebuild(env detailEnv) {
 	d.spans = nil
 	d.hunkRows = nil
-	b := &lineBuilder{width: env.width, wrap: d.wrap}
+	b := &lineBuilder{width: env.width, wrap: d.wrap, scrollX: d.scrollX}
 
 	if d.commit.Hash == "" {
 		b.add(ui.StyleFaint.Render("(select a commit)"))
+		d.view.SetLines(b.lines)
+		return
+	}
+
+	if d.since.on {
+		d.rebuildSince(b, env)
 		d.view.SetLines(b.lines)
 		return
 	}
@@ -239,15 +294,48 @@ func (d *detailPane) rebuild(env detailEnv) {
 		b.add("")
 	}
 
-	// Diff section: a spinner while loading, the error row on failure,
-	// otherwise one rule-delimited section per file.
 	switch {
 	case d.err != "":
 		b.add(ui.StyleDel.Render("git error: " + d.err))
 	case env.loading:
 		b.add(ui.StyleFaint.Render(env.spinner + " loading diff…"))
 	}
-	for _, fd := range d.diffs {
+	d.renderFiles(b, env, d.diffs)
+	d.view.SetLines(b.lines)
+}
+
+// rebuildSince renders the since-diff body under its banner (FR-10).
+func (d *detailPane) rebuildSince(b *lineBuilder, env detailEnv) {
+	dirty := d.since.forHash != d.commit.Hash || d.dirtyOpts
+	b.add(ui.StyleFileRule.Render(d.sinceBanner()))
+	switch {
+	case d.since.err != "":
+		b.add(ui.StyleDel.Render("git error: " + d.since.err))
+	case dirty:
+		b.add(ui.StyleFaint.Render(env.spinner + " loading diff…"))
+	}
+	d.renderFiles(b, env, d.since.diffs)
+}
+
+// sinceBanner renders the "since <abbr> (N commits)" mode banner.
+func (d *detailPane) sinceBanner() string {
+	abbr := d.since.base
+	if len(abbr) > abbrevLen {
+		abbr = abbr[:abbrevLen]
+	}
+	count := "…"
+	if d.since.count >= 0 {
+		count = fmt.Sprintf("%d commits", d.since.count)
+	}
+	return fmt.Sprintf("since %s (%s)", abbr, count)
+}
+
+// renderFiles renders one rule-delimited section per file, in the
+// current viewer mode. spent budgets the syntax-highlighting work of
+// this pass.
+func (d *detailPane) renderFiles(b *lineBuilder, env detailEnv, files []diff.FileDiff) {
+	spent := 0
+	for _, fd := range files {
 		start := len(b.lines)
 		b.add(fileRule(fd, env.width, env.ascii))
 		if fd.Binary {
@@ -259,13 +347,104 @@ func (d *detailPane) rebuild(env detailEnv) {
 		for _, h := range fd.Hunks {
 			d.hunkRows = append(d.hunkRows, len(b.lines))
 			b.add(ui.StyleFaint.Render(h.Header))
-			for _, l := range h.Lines {
-				b.add(diffLine(l))
+			if d.sideBySide {
+				d.renderHunkSideBySide(b, env, fd.Path, h, &spent)
+			} else {
+				for _, l := range h.Lines {
+					b.add(d.unifiedLine(&l, fd.Path, &spent))
+				}
 			}
 		}
 		d.spans = append(d.spans, fileSpan{path: fd.Path, start: start, end: len(b.lines) - 1})
 	}
-	d.view.SetLines(b.lines)
+}
+
+// renderHunkSideBySide renders a hunk as aligned old|new columns (FR-6).
+func (d *detailPane) renderHunkSideBySide(b *lineBuilder, env detailEnv, path string, h diff.Hunk, spent *int) {
+	pairs := diff.PairLines(h.Lines)
+	colW := sideColumnWidth(env.width)
+	div := "│"
+	if env.ascii {
+		div = "|"
+	}
+	for _, p := range pairs {
+		var left, right string
+		if p.Left != nil {
+			left = d.cell(p.Left, path, spent)
+		}
+		if p.Right != nil {
+			right = d.cell(p.Right, path, spent)
+		}
+		b.addSidePair(left, right, colW, div)
+	}
+}
+
+// sideColumnWidth splits the available width into two columns around a
+// one-cell divider.
+func sideColumnWidth(avail int) int {
+	if avail < 3 {
+		return 1
+	}
+	return (avail - 1) / 2
+}
+
+// cell renders one side of a side-by-side row: the kind marker followed
+// by the content, highlighted (or word-emphasized) per viewer options.
+func (d *detailPane) cell(l *diff.DiffLine, path string, spent *int) string {
+	marker := " "
+	var kindStyle lipgloss.Style
+	switch l.Kind {
+	case diff.Add:
+		marker, kindStyle = "+", ui.StyleAdd
+	case diff.Del:
+		marker, kindStyle = "-", ui.StyleDel
+	}
+	var text string
+	if l.HasWords() {
+		text = renderWords(l.Words)
+	} else {
+		text = ui.Highlight(path, l.Text, spent)
+	}
+	return kindStyle.Render(marker + text)
+}
+
+// unifiedLine renders one diff row in unified mode: kind-colored marker
+// and body, with syntax highlighting or intraline word emphasis.
+func (d *detailPane) unifiedLine(l *diff.DiffLine, path string, spent *int) string {
+	kindStyle := lipgloss.NewStyle()
+	var marker string
+	switch l.Kind {
+	case diff.Add:
+		marker, kindStyle = "+", ui.StyleAdd
+	case diff.Del:
+		marker, kindStyle = "-", ui.StyleDel
+	default:
+		marker = " "
+	}
+	var text string
+	if l.HasWords() {
+		text = renderWords(l.Words)
+	} else {
+		text = ui.Highlight(path, l.Text, spent)
+	}
+	return kindStyle.Render(marker + text)
+}
+
+// renderWords joins intraline segments, emphasizing added and removed
+// words with the add/del colors (FR-8).
+func renderWords(ws []diff.WordSeg) string {
+	var b strings.Builder
+	for _, w := range ws {
+		switch w.Kind {
+		case diff.SegAdd:
+			b.WriteString(ui.StyleAdd.Render(w.Text))
+		case diff.SegDel:
+			b.WriteString(ui.StyleDel.Render(w.Text))
+		default:
+			b.WriteString(w.Text)
+		}
+	}
+	return b.String()
 }
 
 // absTimeFormat is the absolute timestamp shown next to the relative age.
@@ -291,32 +470,21 @@ func fileRule(fd diff.FileDiff, width int, ascii bool) string {
 	return ui.StyleFileRule.Render(head + strings.Repeat(rule, fill))
 }
 
-// diffLine renders one diff row with its marker colored by kind.
-func diffLine(l diff.DiffLine) string {
-	switch l.Kind {
-	case diff.Add:
-		return ui.StyleAdd.Render("+" + l.Text)
-	case diff.Del:
-		return ui.StyleDel.Render("-" + l.Text)
-	default:
-		return " " + l.Text
-	}
-}
-
 // lineBuilder accumulates content rows, wrapping each logical line to the
 // pane width according to the wrap mode. All row indices (spans, hunks)
 // are recorded against the wrapped rows, so navigation stays exact.
 type lineBuilder struct {
-	lines []string
-	width int
-	wrap  wrapMode
+	lines   []string
+	width   int
+	wrap    wrapMode
+	scrollX int // horizontal scroll (columns), applied when wrap is off
 }
 
-// add appends one logical line, wrapped as needed.
-func (b *lineBuilder) add(line string) {
+// wrapLines splits one logical line into display rows for the current
+// width and wrap mode.
+func (b *lineBuilder) wrapLines(line string) []string {
 	if b.width <= 0 || b.wrap == wrapNone || lipgloss.Width(line) <= b.width {
-		b.lines = append(b.lines, line)
-		return
+		return []string{line}
 	}
 	var wrapped string
 	if b.wrap == wrapWord {
@@ -324,7 +492,54 @@ func (b *lineBuilder) add(line string) {
 	} else {
 		wrapped = ansi.Hardwrap(line, b.width, true)
 	}
-	b.lines = append(b.lines, strings.Split(wrapped, "\n")...)
+	return strings.Split(wrapped, "\n")
+}
+
+// add appends one logical line, wrapped as needed.
+func (b *lineBuilder) add(line string) {
+	b.lines = append(b.lines, b.wrapLines(line)...)
+}
+
+// addSidePair appends one side-by-side row: both columns wrapped to colW
+// cells and interleaved so paired rows stay aligned (FR-6).
+func (b *lineBuilder) addSidePair(left, right string, colW int, divider string) {
+	leftRows := b.pairCell(left, colW)
+	rightRows := b.pairCell(right, colW)
+	for i := range max(len(leftRows), len(rightRows)) {
+		var l, r string
+		if i < len(leftRows) {
+			l = leftRows[i]
+		}
+		if i < len(rightRows) {
+			r = rightRows[i]
+		}
+		b.lines = append(b.lines, l+divider+r)
+	}
+}
+
+// pairCell clips a side-by-side cell to colW cells: word-wrapped when
+// wrap is on, scrolled and cut when off.
+func (b *lineBuilder) pairCell(cell string, colW int) []string {
+	if b.wrap == wrapNone {
+		// Horizontal scroll: cut the [scrollX, scrollX+colW) window.
+		return []string{padTo(ansi.Cut(cell, b.scrollX, b.scrollX+colW), colW)}
+	}
+	rows := wrapToWidth(cell, b.wrap, colW)
+	for i, r := range rows {
+		rows[i] = padTo(r, colW)
+	}
+	return rows
+}
+
+// wrapToWidth wraps one cell independently of the pane width.
+func wrapToWidth(cell string, mode wrapMode, width int) []string {
+	if width <= 0 || lipgloss.Width(cell) <= width {
+		return []string{cell}
+	}
+	if mode == wrapWord {
+		return strings.Split(ansi.Wrap(cell, width, "-"), "\n")
+	}
+	return strings.Split(ansi.Hardwrap(cell, width, true), "\n")
 }
 
 // detailKey handles the detail pane keys (spec §10.4).
@@ -345,36 +560,64 @@ func (a App) detailKey(key string) (tea.Model, tea.Cmd) {
 	case "w":
 		a.detail.wrap = (a.detail.wrap + 1) % 3
 		a.rebuildDetailLines()
+	case "s":
+		// Side-by-side toggle (FR-6). Word wrap reads best there, so a
+		// no-wrap pane switches to it when entering the mode.
+		a.detail.sideBySide = !a.detail.sideBySide
+		a.detail.scrollX = 0
+		if a.detail.sideBySide && a.detail.wrap == wrapNone {
+			a.detail.wrap = wrapWord
+		}
+		a.rebuildDetailLines()
+	case "h", "l":
+		// Horizontal scroll, only meaningful when rows are not wrapped.
+		if a.detail.wrap == wrapNone {
+			if key == "h" {
+				a.detail.scrollX = max(0, a.detail.scrollX-hScrollStep)
+			} else {
+				a.detail.scrollX += hScrollStep
+			}
+			a.rebuildDetailLines()
+		}
 	case "W":
 		a.detail.ignoreWS = !a.detail.ignoreWS
-		return a, a.refetchDiff()
+		return a, a.refetchDetail()
+	case "i":
+		// Intraline word-diff toggle (FR-8): re-fetch with
+		// --word-diff=plain.
+		a.detail.wordDiff = !a.detail.wordDiff
+		return a, a.refetchDetail()
 	case "+", "=":
 		if a.detail.context < diffContextMax {
 			a.detail.context++
-			return a, a.refetchDiff()
+			return a, a.refetchDetail()
 		}
 	case "-":
 		if a.detail.context > 0 {
 			a.detail.context--
-			return a, a.refetchDiff()
+			return a, a.refetchDetail()
 		}
 	}
 	return a, nil
 }
 
-// refetchDiff re-runs the diff load for the selected commit under the
-// current viewer options. dirtyOpts keeps the status spinner honest even
-// if this load is later dropped as stale by a refresh.
+// refetchDetail re-runs the content load for the selected commit in the
+// current mode (commit diff or since-diff) under the current viewer
+// options. dirtyOpts keeps the status spinner honest even if this load
+// is later dropped as stale by a refresh.
 //
 // Pointer receiver: the dirty flag and the re-rendered content must
 // survive into the model the returned command belongs to.
-func (a *App) refetchDiff() tea.Cmd {
+func (a *App) refetchDetail() tea.Cmd {
 	if a.repo == nil || a.selectedHash == "" || a.cursor >= len(a.commits) {
 		return nil
 	}
 	a.gen++
 	a.detail.dirtyOpts = true
 	a.rebuildDetailLines()
+	if a.detail.since.on {
+		return tea.Batch(a.loadSinceCmd(a.commits[a.cursor]), a.spinKick())
+	}
 	return tea.Batch(a.loadDiffCmd(a.commits[a.cursor]), a.spinKick())
 }
 
@@ -412,13 +655,17 @@ func (a *App) syncFileCursorByPath(path string) {
 }
 
 // rebuildDetailLines re-renders the detail content for the current width,
-// clock, and load state.
+// clock, and load state. A zoomed view gives the pane the full canvas.
 func (a *App) rebuildDetailLines() {
 	if !a.laidOut() {
 		return
 	}
+	w := a.lay.rightW - 2
+	if a.zoom {
+		w = a.width - 2
+	}
 	a.detail.rebuild(detailEnv{
-		width:   a.lay.rightW - 2,
+		width:   w,
 		now:     a.now(),
 		ascii:   a.cfg.ASCII,
 		spinner: a.spinner.View(),

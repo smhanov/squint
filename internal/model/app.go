@@ -15,6 +15,7 @@ import (
 
 	"github.com/squint-tui/squint/internal/git"
 	"github.com/squint-tui/squint/internal/ui"
+	"github.com/squint-tui/squint/internal/watch"
 )
 
 // minWidth and minHeight are the smallest usable terminal dimensions.
@@ -45,6 +46,10 @@ type paneLayout struct {
 	leftW, rightW             int
 	commitsH, filesH, detailH int
 }
+
+// defaultSplitRatio is the 50/50 pane split (spec §7.1). Divider drags
+// adjust it for the session only.
+const defaultSplitRatio = 0.5
 
 // layoutFor derives the pane geometry for a terminal size. It reports
 // false when the terminal is below the minimum (spec §7.1: 80×24).
@@ -89,6 +94,10 @@ type Config struct {
 	NoMouse bool
 	// ASCII requests ASCII-only fallback rendering.
 	ASCII bool
+	// Watch starts the repository watcher (spec §6.4): external commits
+	// trigger a generation-guarded refresh. Tests leave it off so no
+	// background goroutine runs.
+	Watch bool
 	// Now overrides the wall clock; tests pin it for deterministic ages.
 	Now func() time.Time
 	// NoAnimations disables the re-render tick and the spinner animation
@@ -149,6 +158,27 @@ type App struct {
 	help     bool
 	pendingG bool // first "g" of the gg top sequence
 
+	// splitRatio is the left/right width ratio (0–1). Divider drags set
+	// it; session-only, reset to 50/50 by every program start (§7.1).
+	splitRatio float64
+	// zoom renders only the focused pane full-screen (z, FR-16).
+	zoom bool
+	// dragging is true between a divider press and its release.
+	dragging bool
+	// lastClick is the previous commit-row click, for double-click
+	// detection (≡ enter, spec §11).
+	lastClick clickRecord
+	// hint is a transient status-bar message (e.g. the root-commit
+	// since-diff explanation); cleared by the next input.
+	hint string
+	// firstParent shows merge commits against their first parent
+	// instead of the combined diff (p, FR-9). Reset per selection.
+	firstParent bool
+
+	// watcher reports external repository changes; nil when watching is
+	// disabled or there is no repository.
+	watcher *watch.Watcher
+
 	spinner spinner.Model
 }
 
@@ -177,22 +207,36 @@ func New(cfg Config) App {
 		commitsView: ui.NewScroller(),
 		filesView:   ui.NewScroller(),
 		detail:      newDetailPane(),
+		splitRatio:  defaultSplitRatio,
+	}
+	if cfg.SideBySide {
+		a.detail.sideBySide = true
+		a.detail.wrap = wrapWord // word wrap reads best in this mode
 	}
 	if cfg.Repo != nil {
 		// First loads start with Init; the flags only drive the spinners.
 		a.commitsLoading = true
 		a.statusLoading = true
 	}
+	if cfg.Watch && cfg.Repo != nil {
+		a.watcher = watch.New(cfg.Repo.GitDir)
+		a.watcher.Start(cfg.Repo.GitDir, cfg.Repo.CommonDir())
+	}
 	return a
 }
 
-// Init starts the commit-list and status loads. The 30-second re-render
-// tick and the spinner animation arm on the first window-size message.
+// Init starts the commit-list and status loads, plus the watcher drain
+// when watching is on. The 30-second re-render tick and the spinner
+// animation arm on the first window-size message.
 func (a App) Init() tea.Cmd {
 	if a.repo == nil {
 		return nil
 	}
-	return tea.Batch(a.loadCommitsCmd(), a.loadStatusCmd())
+	cmds := []tea.Cmd{a.loadCommitsCmd(), a.loadStatusCmd()}
+	if a.watcher != nil {
+		cmds = append(cmds, watchCmd(a.watcher))
+	}
+	return tea.Batch(cmds...)
 }
 
 // ExitCode reports the process exit code implied by the final state:
@@ -223,8 +267,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffLoadedMsg:
 		return a.diffLoaded(msg)
 
+	case sinceLoadedMsg:
+		return a.sinceLoaded(msg)
+
 	case statusLoadedMsg:
 		return a.statusLoaded(msg)
+
+	case watch.UpdateMsg:
+		// The repository changed under us (spec §6.4): reload list and
+		// status through the same guarded path as a manual refresh, then
+		// keep draining the watcher.
+		m, cmd := a.refresh()
+		app := m.(App)
+		if app.watcher != nil {
+			cmd = tea.Batch(cmd, watchCmd(app.watcher))
+		}
+		return app, cmd
 
 	case tickMsg:
 		a.rebuildCommitsLines() // relative ages
@@ -241,6 +299,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sm, cmd := a.spinner.Update(msg)
 		a.spinner = sm
 		return a, cmd
+	}
+	// Mouse messages last: the v2 runtime delivers several distinct
+	// types, all matched in one place.
+	if m, cmd, handled := a.updateMouse(msg); handled {
+		return m, cmd
 	}
 	return a, nil
 }
@@ -280,34 +343,69 @@ func (a *App) applyState() {
 }
 
 // laidOut reports whether pane geometry is known (a usable size arrived).
-func (a App) laidOut() bool { return a.lay.leftW > 0 && a.lay.rightW > 0 }
+// Only the left pane width is checked: a zoomed files/detail view sets
+// rightW to zero while remaining fully laid out.
+func (a App) laidOut() bool { return a.lay.leftW > 0 && a.lay.commitsH > 0 }
 
 // relayout derives pane geometry and rebuilds every pane's rendered lines
 // for the new widths. Rendering happens here, in Update, so View stays
-// pure (spec §5.1).
+// pure (spec §5.1). The split ratio and the zoom mode apply here too.
 func (a *App) relayout() {
-	lay, ok := layoutFor(a.width, a.height)
+	lay, ok := layoutForRatio(a.width, a.height, a.splitRatio)
 	a.lay = lay
 	if !ok {
 		return
 	}
 	a.commitsView.SetWidth(lay.leftW - 2)
 	a.commitsView.SetHeight(lay.commitsH - 2)
-	a.filesView.SetWidth(lay.rightW - 2)
-	a.filesView.SetHeight(lay.filesH - 2)
-	a.detail.view.SetWidth(lay.rightW - 2)
-	a.detail.view.SetHeight(lay.detailH - 2)
+	switch {
+	case a.zoom && a.focus == focusFiles:
+		// Files pane zoomed full-screen (FR-16).
+		lay.filesH, lay.detailH = lay.commitsH, 0
+		a.lay = lay
+		a.filesView.SetWidth(a.width - 2)
+		a.filesView.SetHeight(lay.commitsH - 2)
+	case a.zoom && a.focus == focusDetail:
+		// Detail pane zoomed full-screen.
+		lay.filesH, lay.detailH = 0, lay.commitsH
+		a.lay = lay
+		a.detail.view.SetWidth(a.width - 2)
+		a.detail.view.SetHeight(lay.commitsH - 2)
+	case a.zoom:
+		// Commits pane zoomed full-screen.
+		lay.leftW, lay.rightW = a.width, 0
+		a.lay = lay
+		a.commitsView.SetWidth(a.width - 2)
+	default:
+		a.filesView.SetWidth(lay.rightW - 2)
+		a.filesView.SetHeight(lay.filesH - 2)
+		a.detail.view.SetWidth(lay.rightW - 2)
+		a.detail.view.SetHeight(lay.detailH - 2)
+	}
 	a.rebuildCommitsLines()
 	a.rebuildFilesLines()
 	a.rebuildDetailLines()
 }
 
+// setFocus moves the focus ring, re-deriving the zoomed layout so the
+// zoomed pane follows the focus (FR-16).
+func (a *App) setFocus(f paneFocus) {
+	if a.focus == f {
+		return
+	}
+	a.focus = f
+	if a.zoom {
+		a.relayout()
+	}
+}
+
 func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	a.hint = "" // any input dismisses a transient hint
 	// Global keys (spec §10.1) work in every pane, state, and overlay.
 	switch key {
 	case "q", "ctrl+c":
-		return a, func() tea.Msg { return tea.Quit() }
+		return a, tea.Batch(a.closeWatch(), func() tea.Msg { return tea.Quit() })
 	case "?":
 		a.help = !a.help
 		return a, nil
@@ -315,6 +413,18 @@ func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.help = false
 		a.pendingG = false
 		return a, nil
+	case "z":
+		// Zoom the focused pane full-screen (FR-16).
+		if a.state != stateOK {
+			return a, nil
+		}
+		a.zoom = !a.zoom
+		a.relayout()
+		return a, nil
+	case "y":
+		return a, a.copyHash(false)
+	case "Y":
+		return a, a.copyHash(true)
 	}
 	if a.help || a.state != stateOK {
 		return a, nil
@@ -322,13 +432,13 @@ func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch key {
 	case "tab", "shift+tab":
-		a.focus = a.focus.cycle(key == "shift+tab")
+		a.setFocus(a.focus.cycle(key == "shift+tab"))
 		return a, nil
 	case "r":
 		return a.refresh()
 	}
 	if f, ok := focusDirect(key); ok {
-		a.focus = f
+		a.setFocus(f)
 		return a, nil
 	}
 
@@ -339,6 +449,18 @@ func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.filesKey(key)
 	default:
 		return a.detailKey(key)
+	}
+}
+
+// closeWatch releases the repository watcher when the program exits.
+func (a App) closeWatch() tea.Cmd {
+	if a.watcher == nil {
+		return nil
+	}
+	w := a.watcher
+	return func() tea.Msg {
+		w.Close()
+		return nil
 	}
 }
 
@@ -361,7 +483,13 @@ func (a App) refresh() (tea.Model, tea.Cmd) {
 			cmds = append(cmds, f)
 		}
 	} else if a.detail.dirtyOpts && a.selectedHash != "" && a.cursor < len(a.commits) {
-		cmds = append(cmds, a.loadDiffCmd(a.commits[a.cursor]), a.spinKick())
+		// A diff refetch left dirty by an option change mid-refresh is
+		// re-issued in the pane's current mode.
+		if a.detail.since.on {
+			cmds = append(cmds, a.loadSinceCmd(a.commits[a.cursor]), a.spinKick())
+		} else {
+			cmds = append(cmds, a.loadDiffCmd(a.commits[a.cursor]), a.spinKick())
+		}
 	}
 	return a, tea.Batch(cmds...)
 }
@@ -403,7 +531,8 @@ func (a *App) startFanout() tea.Cmd {
 
 // selectAt moves the selection to index i, tracking it by hash. Every
 // actual change bumps the generation, killing any loads for the previous
-// selection. It reports whether the selection changed.
+// selection, and drops selection-scoped viewer state. It reports whether
+// the selection changed.
 func (a *App) selectAt(i int) bool {
 	if len(a.commits) == 0 {
 		return false
@@ -417,8 +546,16 @@ func (a *App) selectAt(i int) bool {
 	a.selectedHash = h
 	a.gen++
 	a.pendingG = false
+	a.resetSelectionScoped()
 	a.rebuildCommitsLines()
 	return true
+}
+
+// resetSelectionScoped drops viewer state tied to one commit: the merge
+// first-parent toggle and the since-diff mode.
+func (a *App) resetSelectionScoped() {
+	a.firstParent = false
+	a.detail.dropSince()
 }
 
 func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
@@ -444,6 +581,7 @@ func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
 		// An unborn branch or an emptied window: the empty screen.
 		a.selectedHash = ""
 		a.cursor = 0
+		a.resetSelectionScoped()
 		a.files = nil
 		a.filesHash = ""
 		a.fileCursor = 0
@@ -451,6 +589,7 @@ func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
 	case a.selectedHash == "":
 		a.cursor = 0
 		a.selectedHash = a.commits[0].Hash
+		a.resetSelectionScoped()
 	default:
 		// Cursor stability: re-derive the index from the stored hash; if
 		// the commit vanished, keep the nearest position.
@@ -458,6 +597,7 @@ func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			i = min(a.cursor, len(a.commits)-1)
 			a.selectedHash = a.commits[i].Hash
+			a.resetSelectionScoped()
 		}
 		a.cursor = i
 	}
@@ -492,6 +632,15 @@ func (a App) diffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	a.detail.apply(msg.hash, msg.diffs, msg.err)
+	a.rebuildDetailLines()
+	return a, nil
+}
+
+func (a App) sinceLoaded(msg sinceLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.gen != a.gen || msg.hash != a.selectedHash {
+		return a, nil // stale: the selection or the options moved on
+	}
+	a.detail.applySince(msg.hash, msg.base, msg.count, msg.diffs, msg.err)
 	a.rebuildDetailLines()
 	return a, nil
 }
@@ -572,6 +721,11 @@ func (a App) content() string {
 	}
 	main := a.panesView()
 	hints := hintsFor(a.focus)
+	if a.hint != "" {
+		// A transient message (root-commit since-diff explanation)
+		// replaces the key hints until the next input.
+		hints = ui.StyleMod.Render(a.hint)
+	}
 	if a.statusErr != "" {
 		// The status load failed: surface it where the hints would be.
 		hints = ui.StyleDel.Render("git error: " + a.statusErr)
@@ -582,29 +736,40 @@ func (a App) content() string {
 }
 
 // panesView composes the three-pane layout: commits on the left, files
-// and detail stacked on the right (spec §7.1).
+// and detail stacked on the right (spec §7.1). Zoomed views render only
+// the focused pane, full-screen (FR-16).
 func (a App) panesView() string {
 	filesTitle := fmt.Sprintf("files (Δ %d)", len(a.files))
 	if a.cfg.ASCII {
 		filesTitle = fmt.Sprintf("files (%d)", len(a.files))
 	}
-	left := ui.Pane{
-		Title:   fmt.Sprintf("commits (%d)", len(a.commits)),
-		Focused: a.focus == focusCommits,
-		ASCII:   a.cfg.ASCII,
-	}.Render(a.commitsView.View(), a.lay.leftW, a.lay.commitsH)
-	files := ui.Pane{
-		Title:   filesTitle,
-		Focused: a.focus == focusFiles,
-		ASCII:   a.cfg.ASCII,
-	}.Render(a.filesView.View(), a.lay.rightW, a.lay.filesH)
-	detail := ui.Pane{
-		Title:   "detail",
-		Focused: a.focus == focusDetail,
-		ASCII:   a.cfg.ASCII,
-	}.Render(a.detail.view.View(), a.lay.rightW, a.lay.detailH)
+	if a.zoom {
+		switch a.focus {
+		case focusCommits:
+			return a.paneBox(fmt.Sprintf("commits (%d)", len(a.commits)), a.commitsView.View(), a.width, a.lay.commitsH, true)
+		case focusFiles:
+			return a.paneBox(filesTitle, a.filesView.View(), a.width, a.lay.filesH, true)
+		default:
+			return a.paneBox("detail", a.detail.view.View(), a.width, a.lay.detailH, true)
+		}
+	}
+	left := a.paneBox(fmt.Sprintf("commits (%d)", len(a.commits)), a.commitsView.View(), a.lay.leftW, a.lay.commitsH, a.focus == focusCommits)
+	files := a.paneBox(filesTitle, a.filesView.View(), a.lay.rightW, a.lay.filesH, a.focus == focusFiles)
+	detail := a.paneBox("detail", a.detail.view.View(), a.lay.rightW, a.lay.detailH, a.focus == focusDetail)
 	right := lipgloss.JoinVertical(lipgloss.Left, files, detail)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+// paneBox renders one titled, bordered pane, skipping zero-size boxes.
+func (a App) paneBox(title, body string, w, h int, focused bool) string {
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+	return ui.Pane{
+		Title:   title,
+		Focused: focused,
+		ASCII:   a.cfg.ASCII,
+	}.Render(body, w, h)
 }
 
 // tooSmallView renders the too-small error state.

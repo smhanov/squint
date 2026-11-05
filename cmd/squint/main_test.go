@@ -163,9 +163,22 @@ func TestRunVersionAndHelp(t *testing.T) {
 			t.Errorf("exit code = %d, want %d", code, exitOK)
 		}
 		out := stdout.String()
-		for _, want := range []string{"Usage", "-n", "--since", "-C", "--side-by-side", "--no-mouse", "--ascii"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("help output missing %q:\n%s", want, out)
+		// The help text is the entire user documentation (spec §15):
+		// every flag, every key, and every mode must appear.
+		for _, want := range []string{
+			// Flags.
+			"Usage", "-n", "--since", "-C", "--side-by-side", "--no-mouse", "--ascii",
+			// Global keys and modes.
+			"tab", "shift+tab", "zoom", "refresh", "copy", "quit", "help overlay",
+			// Commits-pane keys.
+			"half page", "page down", "top / bottom", "enter", "since-diff", "first-parent",
+			// Files-pane keys.
+			"first hunk",
+			// Detail-pane keys and modes.
+			"hunk", "side-by-side", "word-diff", "wrap", "ignore whitespace", "context",
+		} {
+			if !strings.Contains(strings.ToLower(out), strings.ToLower(want)) {
+				t.Errorf("help output missing %q", want)
 			}
 		}
 	})

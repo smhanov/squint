@@ -88,7 +88,7 @@ func (a App) filesKey(key string) (tea.Model, tea.Cmd) {
 			// Jump the detail pane to this file's first hunk and move
 			// focus with it (spec §10.3: focus diff at file, FR-4).
 			a.detail.scrollToFile(a.files[a.fileCursor].Path)
-			a.focus = focusDetail
+			a.setFocus(focusDetail)
 		}
 	}
 	return a, nil

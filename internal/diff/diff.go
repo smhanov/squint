@@ -41,6 +41,9 @@ type DiffLine struct {
 	Text  string // content without the leading +/-/space marker
 	OldNo int
 	NewNo int
+	// Words carries intraline word-diff segments (ParseWordDiff only).
+	// Nil for plain unified lines; rendering falls back to Text.
+	Words []WordSeg
 }
 
 // Hunk is one "@@ -a,b +c,d @@" block.
@@ -77,7 +80,17 @@ type FileDiff struct {
 // approximately: their per-parent markers are folded into one line kind
 // (any '+' wins over any '-'), and only the first parent's range is kept
 // as OldStart. Exact per-parent hunks are not modeled.
-func ParseUnified(out []byte) []FileDiff {
+func ParseUnified(out []byte) []FileDiff { return parse(out, false) }
+
+// ParseWordDiff parses the output of git --word-diff=plain into per-file
+// diffs. Changed lines carry inline intraline markers ({+added+} and
+// [-removed-]) instead of paired +/- rows; each parsed DiffLine carries
+// its marker segments in Words so the viewer can render word-level
+// emphasis. Unchanged lines in this format have no leading marker
+// character, so the parser classifies them from their segments.
+func ParseWordDiff(out []byte) []FileDiff { return parse(out, true) }
+
+func parse(out []byte, wordDiff bool) []FileDiff {
 	truncated := false
 	if len(out) > MaxDiffBytes {
 		out = out[:MaxDiffBytes]
@@ -156,6 +169,7 @@ func ParseUnified(out []byte) []FileDiff {
 			// content may legitimately start with "--- " or "index ".
 			var kind LineKind
 			var text string
+			var words []WordSeg
 			switch {
 			case line == "":
 				// Tolerate a bare empty line as an empty context row.
@@ -174,6 +188,33 @@ func ParseUnified(out []byte) []FileDiff {
 					kind = Context
 				}
 				text = body
+			case wordDiff && (strings.Contains(line, "{+") || strings.Contains(line, "[-")):
+				// Word-diff body line: inline {+added+}/[-removed-]
+				// markers instead of a prefix. The kind derives from the
+				// segments so line counters and rendering stay honest: a
+				// line with any plain text exists on both sides; only a
+				// fully wrapped {+…+} or [-…-] row is a pure add/del.
+				words = Words(line)
+				hasAdd, hasDel, hasPlain := false, false, false
+				for _, w := range words {
+					switch w.Kind {
+					case SegAdd:
+						hasAdd = true
+					case SegDel:
+						hasDel = true
+					case SegPlain:
+						hasPlain = true
+					}
+				}
+				switch {
+				case hasAdd && !hasPlain && !hasDel:
+					kind = Add
+				case hasDel && !hasPlain && !hasAdd:
+					kind = Del
+				default:
+					kind = Context
+				}
+				text = line
 			default:
 				switch line[0] {
 				case '+':
@@ -190,7 +231,7 @@ func ParseUnified(out []byte) []FileDiff {
 					kind, text = Context, strings.TrimPrefix(line, " ")
 				}
 			}
-			l := DiffLine{Kind: kind, Text: text}
+			l := DiffLine{Kind: kind, Text: text, Words: words}
 			switch kind {
 			case Add:
 				l.NewNo = newNo

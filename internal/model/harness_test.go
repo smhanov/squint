@@ -103,7 +103,7 @@ func (h *harness) model(m tea.Model) App {
 // driving an animation).
 func isDataMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case commitsLoadedMsg, filesLoadedMsg, diffLoadedMsg, statusLoadedMsg:
+	case commitsLoadedMsg, filesLoadedMsg, diffLoadedMsg, sinceLoadedMsg, statusLoadedMsg:
 		return true
 	}
 	return false

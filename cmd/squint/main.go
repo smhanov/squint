@@ -137,6 +137,7 @@ func run(argv []string, stdout, stderr io.Writer) int {
 		SideBySide: opts.sideBySide,
 		NoMouse:    opts.noMouse,
 		ASCII:      opts.ascii,
+		Watch:      true, // auto-refresh on external commits (spec §6.4)
 	})
 
 	var progOpts []tea.ProgramOption
@@ -232,6 +233,45 @@ Options:
 
 A revision range (e.g. main..feature) and pathspecs after -- are passed
 through to git log.
+
+The screen has three panes: commits on the left; changed files and the
+diff on the right. Selecting a commit shows its message, files, and
+syntax-highlighted diff; squint watches the repository and picks up new
+commits automatically while the selection stays put. Everything below is
+also available through the mouse (wheel scrolls, click selects, drag the
+divider resizes) and in the in-app help (?).
+
+Keys — global:
+  j / k, arrows    move selection or scroll
+  tab, shift+tab   cycle panes
+  1 / 2 / 3        focus commits / files / detail
+  z                zoom the focused pane full-screen
+  r                refresh
+  y / Y            copy the short / full commit hash
+  q, ctrl+c        quit
+  ?                help overlay
+
+Keys — commits pane:
+  ctrl+d / ctrl+u  half page down / up
+  ctrl+f / ctrl+b  page down / up
+  g g / G          top / bottom
+  enter            focus the detail pane
+  d                since-diff: everything from this commit to HEAD
+  p                merge commits: first-parent diff instead of combined
+
+Keys — files pane:
+  enter            jump the diff to the selected file's first hunk
+  [ / ]            previous / next file
+
+Keys — detail pane:
+  ( / )            previous / next hunk
+  [ / ]            previous / next file
+  h / l            scroll left / right (when wrap is off)
+  s                side-by-side diff (old left of new)
+  i                intraline word-diff
+  w                wrap: none -> word -> character
+  W                ignore whitespace
+  + / -            more / fewer context lines
 
 Exit codes:
   0    success

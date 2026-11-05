@@ -32,10 +32,13 @@ jobs:
 
       - name: Read-only git gate
         # squint never mutates a repository: the only git subcommands
-        # internal/git may invoke are the read-only ones. The gate greps
-        # production code for mutating subcommand tokens (quoted, as exec
-        # arguments); test files and the testfixture builder are exempt —
-        # fixtures must build repositories.
+        # internal/git may invoke are the read-only ones — log, status,
+        # diff-tree, show, diff, rev-parse, for-each-ref, version, and
+        # rev-list (rev-list is used read-only, for the since-diff
+        # commit count). The gate greps production code for mutating
+        # subcommand tokens (quoted, as exec arguments); test files and
+        # the testfixture builder are exempt — fixtures must build
+        # repositories.
         shell: bash
         run: |
           ! grep -rnE '"(commit|add|checkout|reset|push|pull|rebase|merge|tag|branch|stash|rm|mv|clean|init|clone|config|gc|prune|cherry-pick|revert|apply|am|bisect|worktree|submodule|notes|replace|restore|switch)"' internal/git --include='*.go' --exclude='*_test.go' --exclude-dir=testfixture
@@ -68,3 +71,22 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+
+  snapshot:
+    name: goreleaser snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Build snapshot artifacts
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --snapshot --clean

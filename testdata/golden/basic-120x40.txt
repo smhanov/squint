@@ -37,4 +37,4 @@
 [90m│[m                                                          [90m│[m[36m│[m                                                          [36m│[m
 [90m╰──────────────────────────────────────────────────────────╯[m[36m╰──────────────────────────────────────────────────────────╯[m
 squint · demo · main · 5 commits                                                                                        
-[2mj/k scroll · () hunk · [/] file · w wrap · W ws · +/- ctx · ? help                                            [m100%      
+[2mj/k scroll · () hunk · [/] file · s side · i words · w wrap · W ws · ? help                                  [m100%       

@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -91,6 +92,9 @@ type DiffOpts struct {
 	// FirstParent shows merge commits against their first parent instead
 	// of the combined view.
 	FirstParent bool
+	// WordDiff requests --word-diff=plain output: inline {+added+}/
+	// [-removed-] intraline markers, parsed by diff.ParseWordDiff.
+	WordDiff bool
 }
 
 // DefaultDiffOpts asks for git's defaults.
@@ -131,5 +135,23 @@ func diffOptArgs(opts DiffOpts) []string {
 	if opts.Context >= 0 {
 		args = append(args, "-U"+strconv.Itoa(opts.Context))
 	}
+	if opts.WordDiff {
+		args = append(args, "--word-diff=plain")
+	}
 	return args
+}
+
+// CountCommits counts the commits between base and head — the commit
+// count shown by the since-diff banner (spec FR-10). Read-only
+// (rev-list --count).
+func CountCommits(ctx context.Context, repo *Repo, base, head string) (int, error) {
+	out, err := NewRunner(repo.Root).Run(ctx, "rev-list", "--count", base+".."+head)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("could not parse rev-list count from %q", out)
+	}
+	return n, nil
 }

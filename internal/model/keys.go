@@ -40,8 +40,12 @@ func globalKeyRows() []keyRow {
 		{"q, ctrl+c", "quit"},
 		{"tab, shift+tab", "cycle panes"},
 		{"1 2 3", "focus commits / files / detail"},
+		{"z", "zoom the focused pane"},
 		{"r", "refresh"},
+		{"y, Y", "copy short / full commit hash"},
 		{"?", "help overlay"},
+		{"", ""},
+		{"mouse", "wheel scrolls, click selects, drag the divider resizes"},
 	}
 }
 
@@ -59,6 +63,9 @@ func paneKeyRows(f paneFocus) []keyRow {
 			{"j, k", "scroll"},
 			{"(, )", "previous / next hunk"},
 			{"[, ]", "previous / next file"},
+			{"h, l", "scroll left / right (wrap off)"},
+			{"s", "side-by-side diff"},
+			{"i", "intraline word-diff"},
 			{"w", "wrap: none → word → character"},
 			{"W", "ignore whitespace"},
 			{"+, -", "diff context lines"},
@@ -70,6 +77,8 @@ func paneKeyRows(f paneFocus) []keyRow {
 			{"ctrl+f, ctrl+b", "page"},
 			{"g g, G", "top / bottom"},
 			{"enter", "focus detail"},
+			{"d", "since-diff to HEAD"},
+			{"p", "merge first-parent diff"},
 		}
 	}
 }
@@ -81,9 +90,9 @@ func hintsFor(f paneFocus) string {
 	case focusFiles:
 		return "j/k move · enter open · [/] file · ? help"
 	case focusDetail:
-		return "j/k scroll · () hunk · [/] file · w wrap · W ws · +/- ctx · ? help"
+		return "j/k scroll · () hunk · [/] file · s side · i words · w wrap · W ws · ? help"
 	default:
-		return "j/k move · enter detail · r refresh · ? help"
+		return "j/k move · enter detail · d since · r refresh · ? help"
 	}
 }
 

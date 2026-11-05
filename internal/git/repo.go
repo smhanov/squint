@@ -182,6 +182,17 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// CommonDir returns the common git directory shared by all worktrees —
+// the location of refs and packed-refs. For a normal repository this is
+// GitDir itself. The value is resolved from the filesystem only; no git
+// process is started.
+func (r *Repo) CommonDir() string {
+	if common, ok := readCommonDir(r.GitDir); ok {
+		return common
+	}
+	return r.GitDir
+}
+
 // IsShallow reports whether the repository is a shallow clone (its git
 // directory contains a shallow file). Linked worktrees keep the flag in
 // the common directory.

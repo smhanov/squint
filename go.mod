@@ -5,8 +5,12 @@ go 1.26.0
 require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/fsnotify/fsnotify v1.10.1
 )
+
+require github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 
 require (
 	charm.land/bubbles/v2 v2.2.1

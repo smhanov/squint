@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,11 +24,41 @@ import (
 //	go test ./internal/model -run TestGoldenFrames -update
 var updateGoldens = flag.Bool("update", false, "rewrite golden frames")
 
+// NO_COLOR: through an ASCII color profile — what a NO_COLOR terminal
+// negotiates — the frame carries no color escapes at all (spec §7.5,
+// AC3). Syntax highlighting rides the same styles, so it degrades with
+// everything else.
+func TestNoColorOutputClean(t *testing.T) {
+	h := newHarness(t, testfixture.Basic)
+	h.press("j")
+	h.press("2")
+	h.press("j")
+	frame := forceProfileNamed(h.frame(), colorprofile.Ascii)
+	for i, line := range strings.Split(frame, "\n") {
+		if strings.Contains(line, "\x1b[3") || strings.Contains(line, "\x1b[9") ||
+			strings.Contains(line, "\x1b[38;5;") || strings.Contains(line, "\x1b[1;3") {
+			t.Fatalf("row %d carries a color escape under the ASCII profile: %q", i, line)
+		}
+	}
+	if !strings.Contains(frame, "commits (") {
+		t.Fatal("ASCII-profile frame lost its content")
+	}
+}
+
+// forceProfileNamed renders the frame through an explicit color profile.
+func forceProfileNamed(frame string, profile colorprofile.Profile) string {
+	var buf bytes.Buffer
+	w := colorprofile.Writer{Forward: &buf, Profile: profile}
+	_, _ = w.Write([]byte(frame))
+	return buf.String()
+}
+
 func TestGoldenFrames(t *testing.T) {
 	type golden struct {
 		name     testfixture.Name
 		w, h     int
 		ascii    bool
+		suffix   string // distinguishes mode variants of one fixture+size
 		interact func(*harness)
 	}
 	interact := func(h *harness) {
@@ -38,20 +69,51 @@ func TestGoldenFrames(t *testing.T) {
 		h.press("j")
 		h.press("enter") // jump the detail pane to the second file
 	}
+	selectContentCommit := func(h *harness) {
+		// The "Fix lane flicker" commit edits a line in place: the best
+		// material for paired and intraline rendering.
+		h.press("j")
+		h.press("j")
+		h.press("j")
+		h.press("3")
+	}
+	sideBySide := func(h *harness) {
+		selectContentCommit(h)
+		h.press("s") // side-by-side with word wrap (FR-6)
+	}
+	intraline := func(h *harness) {
+		selectContentCommit(h)
+		h.exec2(h.sendNoExec(key("i"))) // word-diff refetch (FR-8)
+	}
+	since := func(h *harness) {
+		h.press("j") // second commit: the range to HEAD has content
+		h.press("d") // cumulative since-diff (FR-10)
+	}
+	zoomed := func(h *harness) {
+		interact(h)
+		h.press("1") // focus commits, then zoom it (FR-16)
+		h.press("z")
+	}
 	goldens := []golden{
-		{testfixture.Basic, 120, 40, false, interact},
-		{testfixture.Merges, 120, 40, false, interact},
-		{testfixture.LongMsg, 120, 40, false, interact},
+		{name: testfixture.Basic, w: 120, h: 40, interact: interact},
+		{name: testfixture.Merges, w: 120, h: 40, interact: interact},
+		{name: testfixture.LongMsg, w: 120, h: 40, interact: interact},
 		// A second size pins the layout math against drift.
-		{testfixture.Basic, 80, 24, false, interact},
+		{name: testfixture.Basic, w: 80, h: 24, interact: interact},
 		// The --ascii rendering path.
-		{testfixture.Basic, 120, 40, true, interact},
+		{name: testfixture.Basic, w: 120, h: 40, ascii: true, interact: interact},
+		// Side-by-side, intraline word-diff, since-diff, and zoom.
+		{name: testfixture.Basic, w: 120, h: 40, suffix: "-side", interact: sideBySide},
+		{name: testfixture.Basic, w: 120, h: 40, suffix: "-intraline", interact: intraline},
+		{name: testfixture.Basic, w: 120, h: 40, suffix: "-since", interact: since},
+		{name: testfixture.Basic, w: 120, h: 40, suffix: "-zoom", interact: zoomed},
 	}
 	for _, g := range goldens {
 		name := fmt.Sprintf("%s-%dx%d", g.name, g.w, g.h)
 		if g.ascii {
 			name += "-ascii"
 		}
+		name += g.suffix
 		t.Run(name, func(t *testing.T) {
 			h := sizedHarness(t, g.name, g.w, g.h, g.ascii)
 			g.interact(h)

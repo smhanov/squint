@@ -138,13 +138,65 @@ func (a App) commitsKey(key string) (tea.Model, tea.Cmd) {
 	case "G":
 		a.selectAt(len(a.commits) - 1)
 	case "enter":
-		a.focus = focusDetail
+		a.setFocus(focusDetail)
 		return a, nil
+	case "d":
+		// Since-diff (FR-10): everything from this commit's parent to
+		// HEAD, one keypress.
+		return a.toggleSince()
+	case "p":
+		// First-parent toggle for merge commits (FR-9).
+		return a.toggleFirstParent()
 	default:
 		a.pendingG = false
 		return a, nil
 	}
 	return a, a.startFanout()
+}
+
+// toggleSince switches the detail pane between the selected commit's own
+// diff and the cumulative base..HEAD range. The root commit has no
+// parent to diff against, so it explains itself in the status bar.
+func (a *App) toggleSince() (tea.Model, tea.Cmd) {
+	if a.repo == nil || a.selectedHash == "" || a.cursor >= len(a.commits) {
+		return *a, nil
+	}
+	commit := a.commits[a.cursor]
+	if len(commit.Parents) == 0 {
+		a.hint = "no parent: this is the root commit, there is nothing before it to diff"
+		return *a, nil
+	}
+	a.detail.since.on = !a.detail.since.on
+	a.detail.scrollX = 0
+	if !a.detail.since.on {
+		a.rebuildDetailLines()
+		return *a, nil
+	}
+	a.detail.view.Top()
+	a.detail.row = 0
+	a.gen++ // kill any in-flight load for the previous view
+	a.detail.dirtyOpts = true
+	a.rebuildDetailLines()
+	return *a, tea.Batch(a.loadSinceCmd(commit), a.spinKick())
+}
+
+// toggleFirstParent flips a merge commit between the combined diff and
+// the first-parent diff, re-fetching files and diff (FR-9). Non-merges
+// have nothing to toggle.
+func (a *App) toggleFirstParent() (tea.Model, tea.Cmd) {
+	if a.repo == nil || a.selectedHash == "" || a.cursor >= len(a.commits) {
+		return *a, nil
+	}
+	if !a.commits[a.cursor].Merge() || a.detail.since.on {
+		return *a, nil
+	}
+	a.firstParent = !a.firstParent
+	a.gen++
+	a.detail.dirtyOpts = true
+	a.filesHash = "" // the file list changes with the merge mode
+	a.rebuildFilesLines()
+	a.rebuildDetailLines()
+	return *a, tea.Batch(a.loadFilesCmd(a.commits[a.cursor]), a.loadDiffCmd(a.commits[a.cursor]), a.spinKick())
 }
 
 // padTo pads a (possibly styled) string with spaces to width cells.
