@@ -129,6 +129,11 @@ func run(argv []string, stdout, stderr io.Writer) int {
 	app := model.New(model.Config{
 		RepoName:   filepath.Base(repo.Root),
 		HasCommits: hasCommits,
+		Repo:       repo,
+		N:          opts.count,
+		Since:      opts.since,
+		RevRange:   opts.revRange,
+		Paths:      opts.paths,
 		SideBySide: opts.sideBySide,
 		NoMouse:    opts.noMouse,
 		ASCII:      opts.ascii,
@@ -140,9 +145,14 @@ func run(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	p := tea.NewProgram(app, progOpts...)
-	if _, err := p.Run(); err != nil {
+	final, err := p.Run()
+	if err != nil {
 		fmt.Fprintf(stderr, "squint: %v\n", err)
 		return exitError
+	}
+	// Quitting from the too-small screen is a clean error exit (NFR-8).
+	if fm, ok := final.(model.App); ok && fm.ExitCode() != exitOK {
+		return exitUsage
 	}
 	return exitOK
 }
