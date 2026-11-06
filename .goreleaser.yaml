@@ -61,7 +61,7 @@ homebrew_casks:
     license: MIT
     binaries:
       - squint
-    skip_upload: '{{ eq (getenv "HOMEBREW_TAP_GITHUB_TOKEN") "" }}'
+    skip_upload: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" | eq "" }}'
 
 scoops:
   - repository:
@@ -70,4 +70,4 @@ scoops:
     homepage: "https://github.com/smhanov/squint"
     description: "Review what your LLM just committed, in a terminal UI"
     license: MIT
-    skip_upload: '{{ eq (getenv "SCOOP_GITHUB_TOKEN") "" }}'
+    skip_upload: '{{ envOrDefault "SCOOP_GITHUB_TOKEN" "" | eq "" }}'
