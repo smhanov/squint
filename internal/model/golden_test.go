@@ -55,14 +55,18 @@ func forceProfileNamed(frame string, profile colorprofile.Profile) string {
 }
 
 func TestGoldenFrames(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// Golden frames pin layout geometry and ANSI styling, which the
-		// darwin and linux legs verify (two sizes + ASCII). The Windows
-		// console stack renders widths/escapes differently (code page
-		// and width tables), which is environmental, not a regression;
-		// per-OS frames are tracked as release follow-up work.
-		t.Skip("golden frames are platform-specific; verified on darwin/linux")
-	}
+	// Golden frames pin layout geometry and ANSI styling. Windows
+	// consoles render widths/escapes differently (code page and width
+	// tables), so frames are per-OS: darwin/linux share the root
+	// directory, Windows frames live under windows/ and are produced
+	// by the goldens workflow (workflow_dispatch on a real runner).
+	// Missing frames skip (fresh checkout) rather than fail.
+	goldenDir := func() string {
+		if runtime.GOOS == "windows" {
+			return filepath.Join("..", "..", "testdata", "golden", "windows")
+		}
+		return filepath.Join("..", "..", "testdata", "golden")
+	}()
 	type golden struct {
 		name     testfixture.Name
 		w, h     int
@@ -127,16 +131,25 @@ func TestGoldenFrames(t *testing.T) {
 			h := sizedHarness(t, g.name, g.w, g.h, g.ascii)
 			g.interact(h)
 			frame := forceProfile(h.frame())
-			path := filepath.Join("..", "..", "testdata", "golden", name+".txt")
+			path := filepath.Join(goldenDir, name+".txt")
 			if *updateGoldens {
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("create golden dir: %v", err)
+				}
 				if err := os.WriteFile(path, []byte(frame), 0o644); err != nil {
 					t.Fatalf("write golden: %v", err)
 				}
 				return
 			}
+			if _, err := os.Stat(path); err != nil {
+				if runtime.GOOS == "windows" {
+					t.Skipf("no windows golden frames at %s yet (run the goldens workflow)", path)
+				}
+				t.Fatalf("read golden (run with -update to create): %v", err)
+			}
 			want, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("read golden (run with -update to create): %v", err)
+				t.Fatalf("read golden: %v", err)
 			}
 			if got, want := frame, string(want); got != want {
 				writeDiff(t, path, got, want)

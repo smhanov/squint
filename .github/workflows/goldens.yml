@@ -1,0 +1,31 @@
+name: goldens
+
+# Regenerates the Windows golden frames on a real Windows runner
+# (spec §14: golden frames pin rendering, and the Windows console
+# stack differs from darwin/linux). Run this workflow after any
+# rendering change, then commit the uploaded artifact's frames under
+# testdata/golden/windows/ — the Windows CI leg then compares them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-goldens:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Regenerate golden frames
+        run: go test ./internal/model -run TestGoldenFrames -update
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-golden-frames
+          path: testdata/golden/windows/
