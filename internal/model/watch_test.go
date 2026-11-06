@@ -56,13 +56,21 @@ func TestWatcherUpdatesList(t *testing.T) {
 		app = next.(App)
 		run(cmd)
 	}
-	// Drain the initial loads.
+	// Drain the initial loads: wait for the first message (fixture
+	// setup plus git can be slow on CI runners), then keep draining
+	// until a short quiet period says the loads are done.
 	drain := func() {
-		for {
+		first := true
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
 			select {
 			case msg := <-msgs:
 				handle(msg)
+				first = false
 			case <-time.After(50 * time.Millisecond):
+				if first {
+					continue // nothing yet: keep waiting
+				}
 				return
 			}
 		}
