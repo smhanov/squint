@@ -32,5 +32,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Homebrew tap / scoop bucket updates will need extra tokens
-          # once the smhanov tap and bucket repositories exist.
+          # Tap/bucket updates engage when these secrets exist
+          # (fine-grained PATs with push access to smhanov/homebrew-tap
+          # and smhanov/scoop-bucket); goreleaser skips them otherwise.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          SCOOP_GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}

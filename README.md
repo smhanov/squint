@@ -25,12 +25,16 @@ Requires the `git` binary (≥ 2.20). No configuration files.
 ```sh
 # go install from a tagged release
 go install github.com/smhanov/squint/cmd/squint@latest
+
+# Homebrew (macOS)
+brew install smhanov/tap/squint
 ```
 
 Prebuilt archives for macOS (amd64/arm64), Linux (amd64/arm64, static —
 works on glibc and musl), and Windows (amd64/arm64) are attached to each
-GitHub release with checksums. Homebrew and scoop manifests are planned
-once a tap/bucket repository is published.
+GitHub release with checksums. Windows users can also add the scoop
+bucket: `scoop bucket add smhanov https://github.com/smhanov/scoop-bucket`
+and `scoop install squint`.
 
 ## What it does
 
