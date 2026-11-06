@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,6 +86,11 @@ func TestFilesForBasic(t *testing.T) {
 	})
 
 	t.Run("BinaryModeChangeAndDelete", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			// Windows records no exec bit (core.fileMode is a no-op
+			// there), so the mode change yields no diff entry.
+			t.Skip("mode changes are unrepresentable on Windows")
+		}
 		got := filesFor(t, root, "Add logo, drop notes, settle script mode", MergeCombined)
 		want := []FileEntry{
 			{Status: 'A', Path: "assets/logo.bin"},

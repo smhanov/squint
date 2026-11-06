@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -218,11 +219,21 @@ func TestRunNotARepoExitsError(t *testing.T) {
 }
 
 func TestRunDashC(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(t.TempDir())
+
+	// run(-C) chdirs the process; on Windows a directory that is some
+	// process's working directory cannot be removed, so each subtest
+	// restores the test's directory before its TempDir cleanup runs.
+	restore := func() { os.Chdir(wd) } //nolint:errcheck // best-effort restore
 
 	t.Run("PointsAtNonRepo", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		dir := t.TempDir() // separate non-repo directory
+		t.Cleanup(restore)
 		code := run([]string{"-C", dir}, &stdout, &stderr)
 		if code != exitError {
 			t.Errorf("exit code = %d, want %d (discovery happens after chdir)", code, exitError)
@@ -235,6 +246,7 @@ func TestRunDashC(t *testing.T) {
 	t.Run("MissingDirectory", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		missing := filepath.Join(t.TempDir(), "does-not-exist")
+		t.Cleanup(restore)
 		if code := run([]string{"-C", missing}, &stdout, &stderr); code != exitError {
 			t.Errorf("exit code = %d, want %d", code, exitError)
 		}

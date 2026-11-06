@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,7 +31,14 @@ func TestAllFixturesBuild(t *testing.T) {
 // every fixture input (identity, dates, config, content) is pinned, this
 // hash must be identical across runs, platforms, and git versions; a
 // mismatch means the fixture inputs drifted.
-const wantBasicHeadPrefix = "a916e6eac928"
+// wantBasicHeadPrefix pins the cross-session stability of the basic
+// fixture's identity. Windows records no exec bit (core.fileMode is a
+// no-op there), so the 100755 script entries hash differently and the
+// fixture has one stable head hash per platform family.
+const (
+	wantBasicHeadPrefix        = "a916e6eac928" // darwin, linux
+	wantBasicHeadPrefixWindows = "06b17885cc89" // windows
+)
 
 // TestBasicDeterminism rebuilds the basic fixture twice in one run and
 // requires identical history, plus the pinned head hash prefix.
@@ -45,8 +53,12 @@ func TestBasicDeterminism(t *testing.T) {
 		t.Errorf("rebuilding basic produced different hashes:\n first: %v\nsecond: %v",
 			first, second)
 	}
-	if !strings.HasPrefix(first[0], wantBasicHeadPrefix) {
-		t.Errorf("basic head hash = %s, want prefix %s", first[0], wantBasicHeadPrefix)
+	want := wantBasicHeadPrefix
+	if runtime.GOOS == "windows" {
+		want = wantBasicHeadPrefixWindows
+	}
+	if !strings.HasPrefix(first[0], want) {
+		t.Errorf("basic head hash = %s, want prefix %s", first[0], want)
 	}
 }
 

@@ -91,12 +91,17 @@ func TestDiscoverRepo(t *testing.T) {
 		t.Fatalf("DiscoverRepo(\".\") failed: %v", err)
 	}
 	// The working directory may traverse a symlink (macOS /var ->
-	// /private/var), so compare against the resolved root.
+	// /private/var), and Windows may report 8.3 short names
+	// (RUNNER~1), so compare canonical forms of both sides.
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !filepath.IsAbs(repo.Root) || repo.Root != resolved {
+	got, err := filepath.EvalSymlinks(repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(repo.Root) || got != resolved {
 		t.Errorf("relative Root = %q, want %q", repo.Root, resolved)
 	}
 }

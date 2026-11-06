@@ -102,9 +102,14 @@ func TestRunnerFakeExitCode(t *testing.T) {
 
 func TestRunnerFakeTimeout(t *testing.T) {
 	sh := "sleep 30\n"
-	// batch has no sleep; one ping packet per second stalls long enough.
-	bat := "ping -n 30 127.0.0.1 >nul\n"
+	// batch has no sleep; one ping packet per second stalls well past
+	// the 100ms deadline while keeping the orphaned grandchild (cmd.exe
+	// is killed, ping.exe is not) short-lived.
+	bat := "ping -n 2 127.0.0.1 >nul\n"
 	r := fakeRunner(t, t.TempDir(), sh, bat, 100*time.Millisecond)
+	// The orphaned ping.exe holds the fixture directory open until it
+	// exits (~1s); wait it out so TempDir removal on Windows succeeds.
+	t.Cleanup(func() { time.Sleep(3 * time.Second) })
 
 	start := time.Now()
 	_, err := r.Run(context.Background(), "log", "-z")
@@ -129,11 +134,11 @@ func TestRunnerFakeTimeout(t *testing.T) {
 func TestRunnerFakeStdout(t *testing.T) {
 	// The runner must return stdout verbatim, byte-for-byte, because the
 	// log and diff parsers depend on exact separator bytes. The batch
-	// twin prints via set /p, which adds no newline; the surrounding
-	// whitespace is trimmed on Windows only.
+	// twin uses plain echo (set /p exits 1 under CI's cmd /c); its
+	// trailing newline is trimmed on Windows only.
 	r := fakeRunner(t, t.TempDir(),
 		"printf 'alpha beta gamma'\n",
-		"<nul set /p dummy=\"alpha beta gamma\"\n",
+		"echo alpha beta gamma\n",
 		defaultTimeout)
 	out, err := r.Run(context.Background(), "version")
 	if err != nil {
