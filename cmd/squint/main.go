@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 
 	"charm.land/bubbletea/v2"
@@ -22,8 +23,24 @@ import (
 	"github.com/smhanov/squint/internal/model"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=...".
+// version is overridden at build time via -ldflags "-X main.version=..."
+// (the goreleaser release builds). Plain `go install` builds carry no
+// ldflags, so the fallback reports the module version from the build
+// info, which is the installed tag.
 var version = "dev"
+
+func init() {
+	if version != "dev" {
+		return
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		version = v
+	}
+}
 
 // Exit codes (see the usage text).
 const (
