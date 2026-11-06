@@ -172,7 +172,23 @@ func (a App) loadDiffCmd(commit git.Commit) tea.Cmd {
 		if err != nil {
 			return diffLoadedMsg{hash: commit.Hash, err: err, gen: gen}
 		}
-		return diffLoadedMsg{hash: commit.Hash, diffs: parse(raw), gen: gen}
+		diffs := parse(raw)
+		// One batched tree lookup sizes the binary files for the
+		// detail pane's [binary · size] marker.
+		var binary []string
+		for _, fd := range diffs {
+			if fd.Binary {
+				binary = append(binary, fd.Path)
+			}
+		}
+		if info, err := git.TreeInfo(ctx, repo, commit, binary); err == nil {
+			for i := range diffs {
+				if diffs[i].Binary {
+					diffs[i].Size = info[diffs[i].Path].Size
+				}
+			}
+		}
+		return diffLoadedMsg{hash: commit.Hash, diffs: diffs, gen: gen}
 	}
 }
 

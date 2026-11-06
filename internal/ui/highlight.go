@@ -114,7 +114,9 @@ func Highlight(filename, line string, spent *int) string {
 		*spent++
 	}
 	// Tokenise(nil, …): passing a non-nil options struct trips a state
-	// bug in chroma v2.27, so plain options are used deliberately.
+	// bug in chroma (verified on v2.27.0, the latest release as of
+	// 2026-11); plain options are used deliberately. Revisit when a
+	// chroma release fixes TokeniseOptions.
 	it, err := lx.Tokenise(nil, line)
 	if err != nil {
 		return line

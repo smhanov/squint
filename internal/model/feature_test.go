@@ -112,6 +112,103 @@ func TestSideBySidePairing(t *testing.T) {
 	}
 }
 
+// Combined merge lines render the verbatim per-parent marker columns
+// (not a single folded marker), and side-by-side falls back to unified
+// for them: a combined hunk has no old/new sides to pair.
+func TestCombinedLineRendering(t *testing.T) {
+	d := &detailPane{}
+	spent := 0
+	mk := func(marks []diff.LineKind, text string) diff.DiffLine {
+		return diff.DiffLine{Kind: foldKind(marks), Text: text, Marks: marks}
+	}
+	rows := []string{
+		stripANSI(d.unifiedLine(ptr(mk([]diff.LineKind{diff.Del, diff.Context}, "a")), "f.go", &spent)),
+		stripANSI(d.unifiedLine(ptr(mk([]diff.LineKind{diff.Add, diff.Context}, "A")), "f.go", &spent)),
+		stripANSI(d.unifiedLine(ptr(mk([]diff.LineKind{diff.Context, diff.Add}, "B")), "f.go", &spent)),
+	}
+	want := []string{"- a", "+ A", " +B"}
+	for i, row := range rows {
+		if !strings.HasPrefix(row, want[i]) {
+			t.Errorf("row %d = %q, want prefix %q (verbatim columns)", i, row, want[i])
+		}
+	}
+}
+
+// foldKind mirrors the parser's folded kind for combined lines.
+func foldKind(marks []diff.LineKind) diff.LineKind {
+	hasPlus, hasMinus := false, false
+	for _, m := range marks {
+		switch m {
+		case diff.Add:
+			hasPlus = true
+		case diff.Del:
+			hasMinus = true
+		}
+	}
+	switch {
+	case hasPlus:
+		return diff.Add
+	case hasMinus:
+		return diff.Del
+	default:
+		return diff.Context
+	}
+}
+
+// ptr is a small helper for unifiedLine's pointer parameter.
+func ptr[T any](v T) *T { return &v }
+
+// Binary files carry their tree size into the detail pane's note.
+func TestBinarySizeNote(t *testing.T) {
+	h := newHarness(t, testfixture.Basic)
+	// The default selection (HEAD) adds assets/logo.bin; the harness
+	// drains the diff load, so the sized note is already rendered.
+	start := strings.Index(h.frame(), "[binary · ")
+	if start < 0 {
+		t.Fatal("no [binary · <size>] note in the detail frame")
+	}
+	rest := h.frame()[start:]
+	end := strings.Index(rest, "]")
+	if end < 0 {
+		t.Fatal("binary note has no closing bracket")
+	}
+	note := rest[:end+1]
+	if !strings.HasSuffix(note, "B]") {
+		t.Errorf("binary note = %q, want a trailing size unit", note)
+	}
+}
+
+// Submodule entries render with the gitlink glyph and abbreviated sha.
+func TestSubmoduleFileRow(t *testing.T) {
+	row := fileRow(git.FileEntry{Status: 'A', Path: "vendor/lib", Submodule: "0123456789abcdef0123456789abcdef01234567"}, false, 40, false)
+	plain := stripANSI(row)
+	if !strings.Contains(plain, "⋗ vendor/lib @0123456") {
+		t.Errorf("submodule row = %q, want ⋗ glyph + abbreviated sha", plain)
+	}
+	ascii := stripANSI(fileRow(git.FileEntry{Status: 'A', Path: "vendor/lib", Submodule: "0123456789abcdef0123456789abcdef01234567"}, false, 40, true))
+	if !strings.Contains(ascii, "> vendor/lib @0123456") {
+		t.Errorf("ascii submodule row = %q, want > glyph", ascii)
+	}
+}
+
+func TestHumanSize(t *testing.T) {
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1 KiB"},
+		{1536, "1.5 KiB"},
+		{3 << 20, "3 MiB"},
+	}
+	for _, tt := range tests {
+		if got := humanSize(tt.in); got != tt.want {
+			t.Errorf("humanSize(%d) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 // h/l scroll horizontally when wrap is off and are inert when wrap is on.
 func TestHorizontalScroll(t *testing.T) {
 	h := newHarness(t, testfixture.Basic)
@@ -240,7 +337,6 @@ func TestFirstParentToggle(t *testing.T) {
 	if !h.app.commits[h.app.cursor].Merge() {
 		t.Fatal("fixture selection is not a merge")
 	}
-
 	combined := h.app.filesHash
 	if combined == "" {
 		t.Fatal("files not loaded")

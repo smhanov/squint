@@ -103,6 +103,52 @@ func TestFilesForBasic(t *testing.T) {
 	})
 }
 
+// Submodule entries carry their gitlink sha for the files pane.
+func TestFilesForSubmodule(t *testing.T) {
+	root := testfixture.New(t, testfixture.Submodule)
+	entries := filesFor(t, root, "Pin submodule at inner v1", MergeCombined)
+	for _, e := range entries {
+		if e.Path != "vendor/lib" {
+			continue
+		}
+		if e.Submodule == "" {
+			t.Fatal("vendor/lib has no gitlink sha")
+		}
+		if len(e.Submodule) != 40 {
+			t.Errorf("Submodule = %q, want a full 40-char hash", e.Submodule)
+		}
+		return
+	}
+	t.Fatalf("vendor/lib missing from entries: %v", entries)
+}
+
+// TreeInfo reads modes, types, shas, and sizes in one batched call.
+func TestTreeInfo(t *testing.T) {
+	root := testfixture.New(t, testfixture.Basic)
+	repo, err := DiscoverRepo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits, err := ListCommits(context.Background(), repo, LogOpts{N: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := TreeInfo(context.Background(), repo, commits[0], []string{"assets/logo.bin", "no-such-path"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	te, ok := info["assets/logo.bin"]
+	if !ok {
+		t.Fatal("assets/logo.bin missing from TreeInfo")
+	}
+	if te.Type != "blob" || te.Size <= 0 {
+		t.Errorf("entry = %+v, want a blob with a positive size", te)
+	}
+	if _, ok := info["no-such-path"]; ok {
+		t.Error("unknown path present in TreeInfo")
+	}
+}
+
 func TestFilesForUnicodePaths(t *testing.T) {
 	root := testfixture.New(t, testfixture.UnicodePaths)
 

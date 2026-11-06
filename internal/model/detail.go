@@ -339,7 +339,11 @@ func (d *detailPane) renderFiles(b *lineBuilder, env detailEnv, files []diff.Fil
 		start := len(b.lines)
 		b.add(fileRule(fd, env.width, env.ascii))
 		if fd.Binary {
-			b.add(ui.StyleFaint.Render("[binary]"))
+			note := "[binary]"
+			if fd.Size > 0 {
+				note = "[binary · " + humanSize(fd.Size) + "]"
+			}
+			b.add(ui.StyleFaint.Render(note))
 		}
 		if fd.Truncated {
 			b.add(ui.StyleDel.Render("[diff truncated]"))
@@ -347,9 +351,11 @@ func (d *detailPane) renderFiles(b *lineBuilder, env detailEnv, files []diff.Fil
 		for _, h := range fd.Hunks {
 			d.hunkRows = append(d.hunkRows, len(b.lines))
 			b.add(ui.StyleFaint.Render(h.Header))
-			if d.sideBySide {
+			if d.sideBySide && len(h.Parents) <= 1 {
 				d.renderHunkSideBySide(b, env, fd.Path, h, &spent)
 			} else {
+				// Combined merge hunks have no old/new pairing (the
+				// columns describe parents, not sides); render unified.
 				for _, l := range h.Lines {
 					b.add(d.unifiedLine(&l, fd.Path, &spent))
 				}
@@ -410,16 +416,23 @@ func (d *detailPane) cell(l *diff.DiffLine, path string, spent *int) string {
 
 // unifiedLine renders one diff row in unified mode: kind-colored marker
 // and body, with syntax highlighting or intraline word emphasis.
+// Combined merge lines render their verbatim per-parent marker columns,
+// each column colored by its own marker.
 func (d *detailPane) unifiedLine(l *diff.DiffLine, path string, spent *int) string {
 	kindStyle := lipgloss.NewStyle()
 	var marker string
-	switch l.Kind {
-	case diff.Add:
-		marker, kindStyle = "+", ui.StyleAdd
-	case diff.Del:
-		marker, kindStyle = "-", ui.StyleDel
-	default:
-		marker = " "
+	if len(l.Marks) > 1 {
+		marker = d.combinedMarks(l.Marks)
+		kindStyle = markerStyle(l.Kind)
+	} else {
+		switch l.Kind {
+		case diff.Add:
+			marker, kindStyle = "+", ui.StyleAdd
+		case diff.Del:
+			marker, kindStyle = "-", ui.StyleDel
+		default:
+			marker = " "
+		}
 	}
 	var text string
 	if l.HasWords() {
@@ -428,6 +441,37 @@ func (d *detailPane) unifiedLine(l *diff.DiffLine, path string, spent *int) stri
 		text = ui.Highlight(path, l.Text, spent)
 	}
 	return kindStyle.Render(marker + text)
+}
+
+// combinedMarks renders the verbatim per-parent marker columns of a
+// combined hunk line, coloring each column by its own marker so the row
+// matches git's output exactly (spec §5.3 combined modeling).
+func (d *detailPane) combinedMarks(marks []diff.LineKind) string {
+	var b strings.Builder
+	for _, m := range marks {
+		switch m {
+		case diff.Add:
+			b.WriteString(ui.StyleAdd.Render("+"))
+		case diff.Del:
+			b.WriteString(ui.StyleDel.Render("-"))
+		default:
+			b.WriteString(" ")
+		}
+	}
+	return b.String()
+}
+
+// markerStyle picks the row style for a combined line from its folded
+// kind: any '+' colors the row as an add, else any '-' as a deletion.
+func markerStyle(kind diff.LineKind) lipgloss.Style {
+	switch kind {
+	case diff.Add:
+		return ui.StyleAdd
+	case diff.Del:
+		return ui.StyleDel
+	default:
+		return lipgloss.NewStyle()
+	}
 }
 
 // renderWords joins intraline segments, emphasizing added and removed
@@ -468,6 +512,26 @@ func fileRule(fd diff.FileDiff, width int, ascii bool) string {
 	head := rule + rule + " " + title + " "
 	fill := max(0, width-lipgloss.Width(head))
 	return ui.StyleFileRule.Render(head + strings.Repeat(rule, fill))
+}
+
+// humanSize formats a byte count with binary units; whole values drop
+// the decimal, others keep one.
+func humanSize(n int64) string {
+	const unit = 1024
+	units := []string{"B", "KiB", "MiB", "GiB"}
+	f := float64(n)
+	i := 0
+	for f >= unit && i < len(units)-1 {
+		f /= unit
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d B", n)
+	}
+	if f == float64(int64(f)) {
+		return fmt.Sprintf("%d %s", int64(f), units[i])
+	}
+	return fmt.Sprintf("%.1f %s", f, units[i])
 }
 
 // lineBuilder accumulates content rows, wrapping each logical line to the

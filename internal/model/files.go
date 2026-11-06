@@ -30,7 +30,8 @@ func statusStyle(s byte) lipgloss.Style {
 }
 
 // fileRow renders one row of the file pane. Renames and copies show
-// "old → new" (spec §13); ASCII mode renders the arrow as ->.
+// "old → new" (spec §13); ASCII mode renders the arrow as ->. Submodule
+// entries show "⋗ path @sha" ("> path @sha" in ASCII mode).
 func fileRow(e git.FileEntry, selected bool, width int, ascii bool) string {
 	arrow := " → "
 	if ascii {
@@ -40,6 +41,13 @@ func fileRow(e git.FileEntry, selected bool, width int, ascii bool) string {
 	if e.Orig != "" {
 		path = e.Orig + arrow + e.Path
 	}
+	if e.Submodule != "" {
+		glyph := "⋗"
+		if ascii {
+			glyph = ">"
+		}
+		path = glyph + " " + path + " @" + abbrev(e.Submodule)
+	}
 	if room := width - 2; ansi.StringWidth(path) > room {
 		path = ansi.Truncate(path, max(1, room), "…")
 	}
@@ -48,6 +56,14 @@ func fileRow(e git.FileEntry, selected bool, width int, ascii bool) string {
 		row = ui.StyleReverse.Render(padTo(row, width))
 	}
 	return row
+}
+
+// abbrev shortens a full object hash to the conventional 7 characters.
+func abbrev(hash string) string {
+	if len(hash) > 7 {
+		return hash[:7]
+	}
+	return hash
 }
 
 // rebuildFilesLines renders every row and pins the cursor on screen.
@@ -62,7 +78,8 @@ func (a *App) rebuildFilesLines() {
 		return
 	}
 	if a.filesErr != "" && len(a.files) == 0 {
-		a.filesView.SetLines([]string{ui.StyleDel.Render("git error: " + a.filesErr)})
+		// The error itself lives in the modal overlay (spec §5).
+		a.filesView.SetLines([]string{ui.StyleFaint.Render("unavailable — press r to retry")})
 		return
 	}
 	width := a.lay.rightW - 2

@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,123 @@ func TestParseUnifiedModified(t *testing.T) {
 		"|add:0:3:func main() {|add:0:4:\tprintln(\"hi\")|add:0:5:}"
 	if gotWant := render(h.Lines); gotWant != want {
 		t.Errorf("lines =\n%s\nwant\n%s", gotWant, want)
+	}
+}
+
+// TestParseCombinedHunks checks exact modeling of combined merge diffs.
+// The input is a real `git show --cc` of a two-parent merge (side
+// a,B,c; master A,b,c; result A,B,c). The per-column markers are
+// asserted verbatim; NewNo follows the format's one exact rule — a
+// line is in the result iff no column is '-' — which reproduces the
+// header's +1,3 count.
+func TestParseCombinedHunks(t *testing.T) {
+	in := []byte(strings.Join([]string{
+		"diff --cc f.txt",
+		"index 7be73ce,4f213f7..4484d91",
+		"--- a/f.txt",
+		"+++ b/f.txt",
+		"@@@ -1,3 -1,3 +1,3 @@@",
+		"- a",
+		"+ A",
+		" -b",
+		" +B",
+		"  c",
+	}, "\n") + "\n")
+
+	got := ParseUnified(in)
+	if len(got) != 1 {
+		t.Fatalf("got %d files, want 1", len(got))
+	}
+	f := got[0]
+	if f.Path != "f.txt" || f.Binary {
+		t.Errorf("FileDiff = %+v", f)
+	}
+	if len(f.Hunks) != 1 {
+		t.Fatalf("got %d hunks, want 1", len(f.Hunks))
+	}
+	h := f.Hunks[0]
+	if len(h.Parents) != 2 {
+		t.Fatalf("got %d parent ranges, want 2", len(h.Parents))
+	}
+	if h.Parents[0] != (ParentRange{Start: 1, Count: 3}) ||
+		h.Parents[1] != (ParentRange{Start: 1, Count: 3}) ||
+		h.NewStart != 1 || h.NewCount != 3 {
+		t.Errorf("ranges = %v %d,%d, want 1,3 1,3 1,3", h.Parents, h.NewStart, h.NewCount)
+	}
+
+	type want struct {
+		text  string
+		kind  LineKind
+		marks string // the verbatim marker columns
+		newNo int
+	}
+	wants := []want{
+		{"a", Del, "- ", 0}, // dropped from the result
+		{"A", Add, "+ ", 1},
+		{"b", Del, " -", 0}, // dropped from the result
+		{"B", Add, " +", 2},
+		{"c", Context, "  ", 3},
+	}
+	if len(h.Lines) != len(wants) {
+		t.Fatalf("got %d lines, want %d", len(h.Lines), len(wants))
+	}
+	for i, w := range wants {
+		l := h.Lines[i]
+		if l.Text != w.text || l.Kind != w.kind || l.NewNo != w.newNo || l.OldNo != 0 {
+			t.Errorf("line %d = %q kind %v new %d old %d, want %q %v new %d old 0",
+				i, l.Text, l.Kind, l.NewNo, l.OldNo, w.text, w.kind, w.newNo)
+		}
+		if len(l.Marks) != 2 {
+			t.Fatalf("line %d marks width = %d, want 2", i, len(l.Marks))
+		}
+		marks := make([]rune, len(l.Marks))
+		for col, m := range l.Marks {
+			marks[col] = ' '
+			switch m {
+			case Add:
+				marks[col] = '+'
+			case Del:
+				marks[col] = '-'
+			}
+		}
+		if string(marks) != w.marks {
+			t.Errorf("line %d marks = %q, want %q", i, string(marks), w.marks)
+		}
+	}
+
+	// Result-side invariant: lines with no '-' column are exactly the
+	// result lines, matching the header's +1,3.
+	resultCount := 0
+	for _, l := range h.Lines {
+		if !slices.Contains(l.Marks, Del) {
+			resultCount++
+		}
+	}
+	if resultCount != h.NewCount {
+		t.Errorf("result counted %d lines, hunk range says %d", resultCount, h.NewCount)
+	}
+}
+
+func TestParseCombinedThreeParents(t *testing.T) {
+	// An octopus merge: three parent columns. Only the column width and
+	// ranges are checked — the marker width generalizes over parents.
+	in := []byte(strings.Join([]string{
+		"diff --cc x.txt",
+		"@@@ -1,2 -1,2 -1,2 +1,2 @@@",
+		"- a",
+		"+ b",
+		"  c",
+	}, "\n") + "\n")
+
+	f := ParseUnified(in)
+	h := f[0].Hunks[0]
+	if len(h.Parents) != 3 || h.Parents[2] != (ParentRange{Start: 1, Count: 2}) {
+		t.Fatalf("parents = %v, want three ranges starting at 1", h.Parents)
+	}
+	for _, l := range h.Lines {
+		if len(l.Marks) != 3 {
+			t.Errorf("line %q marks width = %d, want 3", l.Text, len(l.Marks))
+		}
 	}
 }
 
@@ -411,11 +529,32 @@ func TestParseUnifiedCombinedMergeHunk(t *testing.T) {
 	if h.OldStart != 1 || h.OldCount != 2 || h.NewStart != 1 || h.NewCount != 2 {
 		t.Errorf("combined ranges = %d,%d %d,%d, want 1,2 1,2", h.OldStart, h.OldCount, h.NewStart, h.NewCount)
 	}
-	// Markers fold into one kind (any '+' wins, else any '-', else
-	// context); numbers advance per kind as documented.
-	want := "context:1:1:line1|del:2:0:mainline|del:3:0:feature|add:0:2:merged"
+	if len(h.Parents) != 2 || h.Parents[0] != (ParentRange{Start: 1, Count: 2}) {
+		t.Errorf("Parents = %v, want two 1,2 ranges", h.Parents)
+	}
+	// Kind folds per column (any '+' wins, else any '-', else context);
+	// NewNo tracks the exact result rule (in the result iff no column
+	// is '-'); OldNo is 0 — per-parent positions are not derivable.
+	// Marks carry the verbatim columns.
+	want := "context:0:1:line1|del:0:0:mainline|del:0:0:feature|add:0:2:merged"
 	if gotWant := render(h.Lines); gotWant != want {
 		t.Errorf("lines =\n%s\nwant\n%s", gotWant, want)
+	}
+	wantMarks := []string{"  ", " -", " -", "++"}
+	for i, l := range h.Lines {
+		gotMarks := make([]rune, len(l.Marks))
+		for col, m := range l.Marks {
+			gotMarks[col] = ' '
+			switch m {
+			case Add:
+				gotMarks[col] = '+'
+			case Del:
+				gotMarks[col] = '-'
+			}
+		}
+		if string(gotMarks) != wantMarks[i] {
+			t.Errorf("line %d marks = %q, want %q", i, string(gotMarks), wantMarks[i])
+		}
 	}
 }
 

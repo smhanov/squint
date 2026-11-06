@@ -17,6 +17,9 @@ type FileEntry struct {
 	Path string
 	// Orig is the previous path for renames and copies.
 	Orig string
+	// Submodule holds the gitlink commit sha for submodule entries
+	// (mode 160000); empty for ordinary files.
+	Submodule string
 }
 
 // MergeMode selects how a merge commit is diffed.
@@ -50,7 +53,85 @@ func FilesFor(ctx context.Context, repo *Repo, commit Commit, mode MergeMode) ([
 	if err != nil {
 		return nil, err
 	}
-	return parseFileEntries(out), nil
+	entries := parseFileEntries(out)
+
+	// Enrich in one batched tree lookup: submodule entries carry their
+	// gitlink sha for the files pane.
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.Path
+	}
+	if info, err := TreeInfo(ctx, repo, commit, paths); err == nil {
+		for i := range entries {
+			if te := info[entries[i].Path]; te.Type == "commit" {
+				entries[i].Submodule = te.SHA
+			}
+		}
+	}
+	return entries, nil
+}
+
+// TreeEntry is one path's entry of the commit's tree.
+type TreeEntry struct {
+	// Mode is the octal mode, e.g. "100644" or "160000" (gitlink).
+	Mode string
+	// Type is "blob", "commit" (submodule), or "tree".
+	Type string
+	// SHA is the object hash; for gitlinks, the submodule commit.
+	SHA string
+	// Size is the blob size in bytes; -1 when unknown (gitlinks and
+	// submodule entries print "-").
+	Size int64
+}
+
+// TreeInfo looks up the given paths in one commit's tree with a single
+// batched `ls-tree -l -z` call, returning an entry per found path.
+// Unknown paths are simply absent from the map; a lookup failure
+// returns the error.
+func TreeInfo(ctx context.Context, repo *Repo, commit Commit, paths []string) (map[string]TreeEntry, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	args := []string{"ls-tree", "-l", "-z", commit.Hash, "--"}
+	args = append(args, paths...)
+	out, err := NewRunner(repo.Root).Run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseTreeInfo(out), nil
+}
+
+// parseTreeInfo parses ls-tree -z records:
+//
+//	mode SP type SP sha SP size TAB path NUL
+//
+// The size is "-" for gitlinks; both are mapped to -1.
+func parseTreeInfo(out []byte) map[string]TreeEntry {
+	entries := make(map[string]TreeEntry)
+	for record := range strings.SplitSeq(string(out), "\x00") {
+		if record == "" {
+			continue
+		}
+		meta, path, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 4 {
+			continue
+		}
+		size := int64(-1)
+		if n, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+			size = n
+		}
+		entries[path] = TreeEntry{
+			Mode: fields[0],
+			Type: fields[1],
+			SHA:  fields[2],
+			Size: size,
+		}
+	}
+	return entries
 }
 
 // parseFileEntries parses NUL-terminated name-status records:

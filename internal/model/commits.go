@@ -98,7 +98,9 @@ func (a *App) rebuildCommitsLines() {
 		return
 	}
 	if a.commitsErr != "" {
-		a.commitsView.SetLines([]string{ui.StyleDel.Render("git error: " + a.commitsErr)})
+		// The error itself lives in the modal overlay (spec §5); the
+		// pane keeps a quiet placeholder so it is not simply blank.
+		a.commitsView.SetLines([]string{ui.StyleFaint.Render("unavailable — press r to retry")})
 		return
 	}
 	width := a.lay.leftW - 2

@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -44,14 +45,32 @@ type DiffLine struct {
 	// Words carries intraline word-diff segments (ParseWordDiff only).
 	// Nil for plain unified lines; rendering falls back to Text.
 	Words []WordSeg
+	// Marks holds the per-parent marker columns of a combined (merge)
+	// hunk line, verbatim as git printed them, one per parent: Add
+	// ('+'), Del ('-'), or Context (' '). Nil for plain hunks. Kind is
+	// the folded view (any + wins over any -) kept for coloring and
+	// context trimming. The columns are git's own attribution
+	// bookkeeping: only the result side follows an exact rule (a line
+	// is in the result iff no column is '-'), so OldNo stays 0 for
+	// combined lines and NewNo carries the exact result position.
+	Marks []LineKind
 }
 
-// Hunk is one "@@ -a,b +c,d @@" block.
+// ParentRange is one parent's "@@ -a,b" range of a combined hunk.
+type ParentRange struct {
+	Start, Count int
+}
+
+// Hunk is one "@@ -a,b +c,d @@" block. Combined merge hunks ("@@@")
+// also carry Parents, one range per parent.
 type Hunk struct {
 	Header             string
 	OldStart, OldCount int
 	NewStart, NewCount int
-	Lines              []DiffLine
+	// Parents holds every parent's range of a combined hunk, first
+	// parent first; nil for plain hunks (Old*/New* are the two sides).
+	Parents []ParentRange
+	Lines   []DiffLine
 }
 
 // FileDiff is one file's diff as parsed from unified output.
@@ -67,6 +86,9 @@ type FileDiff struct {
 	// Binary marks binary files (marker line or a NUL byte sniffed in
 	// the patch body). Their Hunks stay empty.
 	Binary bool
+	// Size is the blob size in bytes for binary files when known
+	// (enriched from the tree); 0 when unknown. Text files don't carry it.
+	Size int64
 	// Truncated is set on the file that lost text to MaxDiffBytes.
 	Truncated bool
 	Hunks     []Hunk
@@ -76,10 +98,12 @@ type FileDiff struct {
 // lenient: unknown lines are skipped, malformed hunks never abort the
 // parse, and empty input yields nil.
 //
-// Combined merge diffs ("diff --cc" with "@@@" headers) are captured
-// approximately: their per-parent markers are folded into one line kind
-// (any '+' wins over any '-'), and only the first parent's range is kept
-// as OldStart. Exact per-parent hunks are not modeled.
+// Combined merge diffs ("diff --cc" with "@@@" headers) are modeled
+// exactly as far as the format defines: each hunk carries one range per
+// parent (Hunk.Parents), each body line carries its verbatim per-parent
+// marker columns (DiffLine.Marks), and NewNo tracks the result side,
+// which follows the one exact rule of the combined format — a line is
+// in the result iff no column is '-'.
 func ParseUnified(out []byte) []FileDiff { return parse(out, false) }
 
 // ParseWordDiff parses the output of git --word-diff=plain into per-file
@@ -101,7 +125,7 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 	var cur *fileState
 	var hunk *Hunk // points into cur.Hunks
 	oldNo, newNo := 0, 0
-	combined := 0 // prefix columns of a combined hunk; 0 = plain
+	combinedCols := 0 // marker columns of a combined hunk; 0 = plain
 
 	flush := func() {
 		if cur == nil {
@@ -117,7 +141,7 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 		})
 		cur = nil
 		hunk = nil
-		combined = 0
+		combinedCols = 0
 	}
 
 	lines := strings.Split(string(out), "\n")
@@ -141,18 +165,17 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 			cur.toSummary = unquote(rest)
 
 		case strings.HasPrefix(line, "@@@"):
-			// Combined merge hunk: "@@@ -a,b -c,d +e,f @@@". The old
-			// side keeps the first parent's range. Checked before the
-			// hunk-body branch: body lines carry a marker prefix and
-			// can never start with "@@".
+			// Combined merge hunk: "@@@ -a,b -c,d +e,f @@@". Checked
+			// before the hunk-body branch: body lines carry a marker
+			// prefix and can never start with "@@".
 			h, parents, ok := parseCombinedHeader(line)
 			if !ok || cur == nil {
 				continue
 			}
 			cur.hunks = append(cur.hunks, h)
 			hunk = &cur.hunks[len(cur.hunks)-1]
-			oldNo, newNo = h.OldStart, h.NewStart
-			combined = parents
+			combinedCols = len(parents)
+			oldNo, newNo = 0, h.NewStart
 
 		case strings.HasPrefix(line, "@@ "):
 			h, ok := parseHunkHeader(line)
@@ -162,7 +185,7 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 			cur.hunks = append(cur.hunks, h)
 			hunk = &cur.hunks[len(cur.hunks)-1]
 			oldNo, newNo = h.OldStart, h.NewStart
-			combined = 0
+			combinedCols = 0
 
 		case hunk != nil:
 			// Inside a hunk every line is body until the next header;
@@ -170,24 +193,42 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 			var kind LineKind
 			var text string
 			var words []WordSeg
+			var marks []LineKind
 			switch {
-			case line == "":
-				// Tolerate a bare empty line as an empty context row.
-				kind, text = Context, ""
-			case combined > 0:
-				if len(line) < combined {
+			case combinedCols > 0:
+				// Combined body: one marker column per parent, verbatim,
+				// then the content. Only the result side follows an
+				// exact rule: the line is in the result iff no column
+				// is '-'; the columns themselves are git's attribution
+				// bookkeeping (see DiffLine.Marks).
+				if len(line) < combinedCols {
 					continue
 				}
-				prefix, body := line[:combined], line[combined:]
+				prefix, body := line[:combinedCols], line[combinedCols:]
+				hasPlus, hasMinus := false, false
+				marks = make([]LineKind, combinedCols)
+				for i := 0; i < combinedCols; i++ {
+					switch prefix[i] {
+					case '+':
+						marks[i], hasPlus = Add, true
+					case '-':
+						marks[i], hasMinus = Del, true
+					default:
+						marks[i] = Context
+					}
+				}
 				switch {
-				case strings.ContainsRune(prefix, '+'):
+				case hasPlus:
 					kind = Add
-				case strings.ContainsRune(prefix, '-'):
+				case hasMinus:
 					kind = Del
 				default:
 					kind = Context
 				}
 				text = body
+			case line == "":
+				// Tolerate a bare empty line as an empty context row.
+				kind, text = Context, ""
 			case wordDiff && (strings.Contains(line, "{+") || strings.Contains(line, "[-")):
 				// Word-diff body line: inline {+added+}/[-removed-]
 				// markers instead of a prefix. The kind derives from the
@@ -231,7 +272,21 @@ func parse(out []byte, wordDiff bool) []FileDiff {
 					kind, text = Context, strings.TrimPrefix(line, " ")
 				}
 			}
-			l := DiffLine{Kind: kind, Text: text, Words: words}
+			l := DiffLine{Kind: kind, Text: text, Words: words, Marks: marks}
+			if marks != nil {
+				// Combined: the result position is exact (a line is in
+				// the result iff no column is '-'); there is no
+				// derivable per-parent position (see the Marks doc).
+				if !slices.Contains(marks, Del) {
+					l.NewNo = newNo
+					newNo++
+				}
+				hunk.Lines = append(hunk.Lines, l)
+				if strings.ContainsRune(text, 0) {
+					cur.binary = true
+				}
+				continue
+			}
 			switch kind {
 			case Add:
 				l.NewNo = newNo
@@ -396,28 +451,36 @@ func parseHunkHeader(line string) (Hunk, bool) {
 }
 
 // parseCombinedHeader parses "@@@ -a,b -c,d +e,f @@@": one range per
-// parent plus the new side. It returns the hunk (old range from the first
-// parent, new from the last) and the number of parents, which equals the
-// per-line prefix width.
-func parseCombinedHeader(line string) (Hunk, int, bool) {
+// parent plus the new side. It returns the hunk with every parent's
+// range (Parents; OldStart/OldCount alias the first parent, New* the
+// result) and the parent list for the parser's column width.
+func parseCombinedHeader(line string) (Hunk, []ParentRange, bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 4 || fields[0] != "@@@" || fields[len(fields)-1] != "@@@" {
-		return Hunk{}, 0, false
+		return Hunk{}, nil, false
 	}
 	ranges := fields[1 : len(fields)-1]
 	if len(ranges) < 2 {
-		return Hunk{}, 0, false
+		return Hunk{}, nil, false
 	}
-	oldStart, oldCount, ok1 := parseRange(ranges[0])
-	newStart, newCount, ok2 := parseRange(ranges[len(ranges)-1])
-	if !ok1 || !ok2 {
-		return Hunk{}, 0, false
+	parents := make([]ParentRange, len(ranges)-1)
+	for i := range parents {
+		start, count, ok := parseRange(ranges[i])
+		if !ok {
+			return Hunk{}, nil, false
+		}
+		parents[i] = ParentRange{Start: start, Count: count}
+	}
+	newStart, newCount, ok := parseRange(ranges[len(ranges)-1])
+	if !ok {
+		return Hunk{}, nil, false
 	}
 	return Hunk{
 		Header:   line,
-		OldStart: oldStart, OldCount: oldCount,
+		OldStart: parents[0].Start, OldCount: parents[0].Count,
 		NewStart: newStart, NewCount: newCount,
-	}, len(ranges) - 1, true
+		Parents: parents,
+	}, parents, true
 }
 
 // parseRange parses "-a,b" or "+a,b"; the count defaults to 1.

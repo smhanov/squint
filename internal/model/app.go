@@ -134,6 +134,8 @@ type App struct {
 	commitsLoading    bool
 	commitsLoadedOnce bool
 	commitsErr        string
+	errOverlay        string // non-empty: the error overlay is up (spec §5)
+	errFrom           string // pane that raised the overlay
 	commitsView       ui.Scroller
 
 	// nowFn is the wall clock; tests pin it for deterministic ages.
@@ -152,7 +154,6 @@ type App struct {
 	// Status bar state.
 	status        git.RepoStatus
 	statusLoading bool
-	statusErr     string
 
 	focus    paneFocus
 	help     bool
@@ -399,6 +400,7 @@ func (a *App) setFocus(f paneFocus) {
 	}
 }
 
+// updateKey routes one keystroke: globals first, then the focused pane.
 func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	a.hint = "" // any input dismisses a transient hint
@@ -425,6 +427,12 @@ func (a App) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, a.copyHash(false)
 	case "Y":
 		return a, a.copyHash(true)
+	}
+	if a.errOverlay != "" {
+		// The error overlay (spec §5) is modal to the panes: any other
+		// key dismisses it; r then re-runs the failed load.
+		a.errOverlay, a.errFrom = "", ""
+		return a, nil
 	}
 	if a.help || a.state != stateOK {
 		return a, nil
@@ -558,6 +566,20 @@ func (a *App) resetSelectionScoped() {
 	a.detail.dropSince()
 }
 
+// fail raises the error overlay for a pane (spec §5: GitError surfaced
+// in an error overlay). A later failure replaces it.
+func (a *App) fail(pane string, err error) {
+	a.errOverlay = err.Error()
+	a.errFrom = pane
+}
+
+// succeed clears the overlay when the pane that raised it recovers.
+func (a *App) succeed(pane string) {
+	if a.errFrom == pane {
+		a.errOverlay, a.errFrom = "", ""
+	}
+}
+
 func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.gen != a.globalSeq {
 		return a, nil // stale: a newer list is already on its way
@@ -565,10 +587,12 @@ func (a App) commitsLoaded(msg commitsLoadedMsg) (tea.Model, tea.Cmd) {
 	a.commitsLoading = false
 	if msg.err != nil {
 		a.commitsErr = msg.err.Error()
+		a.fail("commits", msg.err)
 		a.rebuildCommitsLines()
 		return a, nil
 	}
 	a.commitsErr = ""
+	a.succeed("commits")
 	a.commits = msg.commits
 	a.commitIndex = make(map[string]int, len(a.commits))
 	for i, c := range a.commits {
@@ -618,8 +642,10 @@ func (a App) filesLoaded(msg filesLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		a.filesErr = msg.err.Error()
 		a.files = nil
+		a.fail("files", msg.err)
 	} else {
 		a.files = msg.files
+		a.succeed("files")
 	}
 	a.filesHash = msg.hash
 	a.fileCursor = 0
@@ -631,6 +657,11 @@ func (a App) diffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.gen != a.gen || msg.hash != a.selectedHash {
 		return a, nil
 	}
+	if msg.err != nil {
+		a.fail("diff", msg.err)
+	} else {
+		a.succeed("diff")
+	}
 	a.detail.apply(msg.hash, msg.diffs, msg.err)
 	a.rebuildDetailLines()
 	return a, nil
@@ -639,6 +670,11 @@ func (a App) diffLoaded(msg diffLoadedMsg) (tea.Model, tea.Cmd) {
 func (a App) sinceLoaded(msg sinceLoadedMsg) (tea.Model, tea.Cmd) {
 	if msg.gen != a.gen || msg.hash != a.selectedHash {
 		return a, nil // stale: the selection or the options moved on
+	}
+	if msg.err != nil {
+		a.fail("since", msg.err)
+	} else {
+		a.succeed("since")
 	}
 	a.detail.applySince(msg.hash, msg.base, msg.count, msg.diffs, msg.err)
 	a.rebuildDetailLines()
@@ -651,10 +687,10 @@ func (a App) statusLoaded(msg statusLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	a.statusLoading = false
 	if msg.err != nil {
-		a.statusErr = msg.err.Error()
+		a.fail("status", msg.err)
 		return a, nil
 	}
-	a.statusErr = ""
+	a.succeed("status")
 	a.status = msg.status
 	return a, nil
 }
@@ -719,6 +755,9 @@ func (a App) content() string {
 	if a.help {
 		return a.helpOverlay()
 	}
+	if a.errOverlay != "" {
+		return a.errorOverlay()
+	}
 	main := a.panesView()
 	hints := hintsFor(a.focus)
 	if a.hint != "" {
@@ -726,13 +765,23 @@ func (a App) content() string {
 		// replaces the key hints until the next input.
 		hints = ui.StyleMod.Render(a.hint)
 	}
-	if a.statusErr != "" {
-		// The status load failed: surface it where the hints would be.
-		hints = ui.StyleDel.Render("git error: " + a.statusErr)
-	}
 	bar1 := ui.StatusBar(a.statusInfo(), a.width)
 	bar2 := ui.HintsBar(hints, a.scrollPercent(), a.width)
 	return lipgloss.JoinVertical(lipgloss.Left, main, bar1, bar2)
+}
+
+// errorOverlay renders a modal overlay for a failed load (spec §5):
+// the pane's error, a dismiss hint, and a retry hint. Any key closes
+// it; a successful load of the same pane clears it automatically.
+func (a App) errorOverlay() string {
+	body := ui.StyleDel.Render("git error: "+a.errOverlay) + "\n\n" +
+		"any key dismisses · r retries the load"
+	boxW := min(max(lipgloss.Width(body)+8, 40), a.width-4)
+	box := ui.Pane{
+		Title: "load failed",
+		ASCII: a.cfg.ASCII,
+	}.Render(body, boxW, 5)
+	return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // panesView composes the three-pane layout: commits on the left, files

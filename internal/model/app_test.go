@@ -112,27 +112,48 @@ func diffPaths(files []diff.FileDiff) string {
 	return strings.Join(paths, ",")
 }
 
-// Load failures surface inline in the affected pane, not as a crash.
-func TestErrorRowsRendering(t *testing.T) {
+// Load failures surface in the modal error overlay (spec §5): any key
+// dismisses it, and the pane that raised it clears it on recovery.
+func TestErrorOverlay(t *testing.T) {
 	h := newHarness(t, testfixture.Basic)
 
 	// Force a commits-list error through the current global sequence.
 	h.send(commitsLoadedMsg{err: errFake("boom"), gen: h.app.globalSeq})
 	if !strings.Contains(h.frame(), "git error: boom") {
-		t.Error("commits pane does not render the load error")
+		t.Error("error overlay does not render the commits error")
 	}
 
-	// A files error shows in the files pane.
+	// Any key dismisses the overlay.
+	h.press("j")
+	if strings.Contains(h.frame(), "git error: boom") {
+		t.Error("overlay did not dismiss on key press")
+	}
+
+	// A successful load of the pane that raised it clears a re-raised
+	// overlay automatically.
+	h.send(commitsLoadedMsg{err: errFake("boom"), gen: h.app.globalSeq})
+	h.send(commitsLoadedMsg{commits: h.app.commits, gen: h.app.globalSeq})
+	if strings.Contains(h.frame(), "git error: boom") {
+		t.Error("overlay did not clear after a successful commits load")
+	}
+
+	// A files error raises the overlay; a success from another pane
+	// must not clear it.
 	filesHash := h.app.filesHash
 	h.send(filesLoadedMsg{hash: h.app.selectedHash, err: errFake("nope"), gen: h.app.gen})
 	if filesHash != h.app.filesHash {
 		t.Error("a failed load must not update filesHash (pane would look loaded)")
 	}
-
-	// A status error shows in the hints bar.
-	h.send(statusLoadedMsg{err: errFake("status broke"), gen: h.app.globalSeq})
-	if !strings.Contains(h.frame(), "git error: status broke") {
-		t.Error("hints bar does not render the status error")
+	if !strings.Contains(h.frame(), "git error: nope") {
+		t.Error("files error did not raise the overlay")
+	}
+	h.send(diffLoadedMsg{hash: h.app.selectedHash, gen: h.app.gen})
+	if !strings.Contains(h.frame(), "git error: nope") {
+		t.Error("another pane's success cleared the files overlay")
+	}
+	h.send(filesLoadedMsg{hash: h.app.selectedHash, files: nil, gen: h.app.gen})
+	if strings.Contains(h.frame(), "git error: nope") {
+		t.Error("overlay did not clear after a successful files load")
 	}
 }
 
