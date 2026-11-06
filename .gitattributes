@@ -1,0 +1,4 @@
+# Golden frames are byte-exact renderings: no EOL conversion,
+# no diff mangling. The Windows frames must stay LF on checkout
+# or the comparison sees phantom \r characters.
+testdata/golden/** -text

@@ -36,12 +36,14 @@ jobs:
         # diff-tree, show, diff, rev-parse, for-each-ref, version, and
         # rev-list (rev-list is used read-only, for the since-diff
         # commit count). The gate greps production code for mutating
-        # subcommand tokens (quoted, as exec arguments); test files and
-        # the testfixture builder are exempt — fixtures must build
+        # subcommand tokens quoted as a complete exec argument (a
+        # string literal directly followed by ',' or ')'), so words
+        # like a tree-entry type comparison don't trip it; test files
+        # and the testfixture builder are exempt — fixtures must build
         # repositories.
         shell: bash
         run: |
-          ! grep -rnE '"(commit|add|checkout|reset|push|pull|rebase|merge|tag|branch|stash|rm|mv|clean|init|clone|config|gc|prune|cherry-pick|revert|apply|am|bisect|worktree|submodule|notes|replace|restore|switch)"' internal/git --include='*.go' --exclude='*_test.go' --exclude-dir=testfixture
+          ! grep -rnE '"(commit|add|checkout|reset|push|pull|rebase|merge|tag|branch|stash|rm|mv|clean|init|clone|config|gc|prune|cherry-pick|revert|apply|am|bisect|worktree|submodule|notes|replace|restore|switch)"(,|\))' internal/git --include='*.go' --exclude='*_test.go' --exclude-dir=testfixture
 
   lint:
     name: golangci-lint
