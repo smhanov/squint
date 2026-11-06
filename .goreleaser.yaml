@@ -2,8 +2,9 @@
 # (amd64/arm64), Linux (amd64/arm64), and Windows (amd64/arm64).
 # CGO_ENABLED=0 keeps every artifact a self-contained static binary; the
 # Linux builds are static and therefore run unchanged on both glibc and
-# musl systems. Homebrew tap and scoop bucket manifests are updated from
-# the release, and `go install` works from the tagged module.
+# musl systems, and `go install` works from the tagged module.
+# Homebrew tap and scoop bucket manifest updates are pending until the
+# smhanov/homebrew-tap and smhanov/scoop-bucket repositories exist.
 version: 2
 
 project_name: squint
@@ -48,21 +49,3 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
-
-homebrew_casks:
-  - repository:
-      owner: squint-tui
-      name: homebrew-tap
-    homepage: "https://github.com/squint-tui/squint"
-    description: "Review what your LLM just committed, in a terminal UI"
-    license: MIT
-    binaries:
-      - squint
-
-scoops:
-  - repository:
-      owner: squint-tui
-      name: scoop-bucket
-    homepage: "https://github.com/squint-tui/squint"
-    description: "Review what your LLM just committed, in a terminal UI"
-    license: MIT

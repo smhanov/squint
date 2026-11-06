@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/git/testfixture"
-	"github.com/squint-tui/squint/internal/watch"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/watch"
 )
 
 // End-to-end auto-refresh (AC6, FR-11): the app runs with the watcher

@@ -24,16 +24,13 @@ Requires the `git` binary (≥ 2.20). No configuration files.
 
 ```sh
 # go install from a tagged release
-go install github.com/squint-tui/squint/cmd/squint@latest
-
-# Homebrew (after the first tag ships)
-brew install squint-tui/tap/squint
+go install github.com/smhanov/squint/cmd/squint@latest
 ```
 
 Prebuilt archives for macOS (amd64/arm64), Linux (amd64/arm64, static —
 works on glibc and musl), and Windows (amd64/arm64) are attached to each
-GitHub release with checksums. Windows users get scoop manifests from the
-same release.
+GitHub release with checksums. Homebrew and scoop manifests are planned
+once a tap/bucket repository is published.
 
 ## What it does
 

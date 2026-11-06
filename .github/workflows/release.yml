@@ -32,7 +32,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tap/bucket updates need a token with push access to the
-          # squint-tui homebrew-tap and scoop-bucket repositories.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          SCOOP_GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
+          # Homebrew tap / scoop bucket updates will need extra tokens
+          # once the smhanov tap and bucket repositories exist.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/squint-tui/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/git/testfixture"
 )
 
 func TestStatusClean(t *testing.T) {

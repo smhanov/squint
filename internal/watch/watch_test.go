@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/git/testfixture"
 )
 
 // shortenIntervals speeds the watcher up for tests and restores the

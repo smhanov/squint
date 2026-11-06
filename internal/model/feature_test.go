@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/squint-tui/squint/internal/diff"
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/diff"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/git/testfixture"
 )
 
 // ---- zoom (FR-16) ----

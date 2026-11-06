@@ -13,9 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/ui"
-	"github.com/squint-tui/squint/internal/watch"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/ui"
+	"github.com/smhanov/squint/internal/watch"
 )
 
 // minWidth and minHeight are the smallest usable terminal dimensions.

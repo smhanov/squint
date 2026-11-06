@@ -13,8 +13,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/git/testfixture"
 )
 
 // Golden frames: the full frame for each core fixture, rendered with a

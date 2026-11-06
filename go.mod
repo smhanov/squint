@@ -1,4 +1,4 @@
-module github.com/squint-tui/squint
+module github.com/smhanov/squint
 
 go 1.26.0
 

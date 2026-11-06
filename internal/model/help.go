@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/squint-tui/squint/internal/ui"
+	"github.com/smhanov/squint/internal/ui"
 )
 
 // help.go is the ? overlay: the global keys plus the focused pane's own

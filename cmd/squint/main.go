@@ -18,8 +18,8 @@ import (
 	"charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/model"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/model"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".

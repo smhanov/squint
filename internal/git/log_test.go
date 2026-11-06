@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/squint-tui/squint/internal/git/testfixture"
+	"github.com/smhanov/squint/internal/git/testfixture"
 )
 
 // listCommits is ListCommits with default options, failing the test on

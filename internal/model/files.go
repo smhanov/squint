@@ -5,8 +5,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/squint-tui/squint/internal/git"
-	"github.com/squint-tui/squint/internal/ui"
+	"github.com/smhanov/squint/internal/git"
+	"github.com/smhanov/squint/internal/ui"
 )
 
 // files.go renders the changed-file pane: one row per file with its
