@@ -5,37 +5,37 @@
 #
 #   vhs demo/demo.tape
 #
-# docs/demo.gif is regenerated on release; the recording needs the vhs
-# binary (https://github.com/charmbracelet/vhs) plus ffmpeg.
+# The recording needs the vhs binary plus ffmpeg, and a scratch repo
+# named squint-demo-repo in the checkout root with a ./squint binary.
 Output demo/demo.gif
-Set FontSize 20
-Set Width 1100
-Set Height 640
+Set FontSize 16
+Set Width 1400
+Set Height 800
 Set Theme "Dracula"
 
 Type "cd squint-demo-repo"
 Enter
-Wait 300ms
+Sleep 300ms
 Type "./squint --side-by-side"
 Enter
-Wait 2s
-Key Down
-Wait 1s
-Key Tab
-Wait 600ms
-Key Down
-Wait 600ms
-Key Enter
-Wait 1.5s
-Key Tab
-Wait 600ms
-Key RightBracket
-Wait 800ms
-Key s
-Wait 1.2s
-Key i
-Wait 1.2s
-Key d
-Wait 2s
-Key q
-Wait 800ms
+Sleep 2s
+Down
+Sleep 1s
+Tab
+Sleep 600ms
+Down
+Sleep 600ms
+Enter
+Sleep 1.5s
+Tab
+Sleep 600ms
+Type "]"
+Sleep 800ms
+Type "s"
+Sleep 1.2s
+Type "i"
+Sleep 1.2s
+Type "d"
+Sleep 2s
+Type "q"
+Sleep 800ms

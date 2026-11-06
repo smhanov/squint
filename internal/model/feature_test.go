@@ -155,6 +155,34 @@ func foldKind(marks []diff.LineKind) diff.LineKind {
 	}
 }
 
+// Mouse routing: the wheel scrolls the pane under the cursor (spec
+// §11), here the detail pane, which must have overflow for the scroll
+// to move. Pressing "3" focuses the detail pane so the hints bar's
+// scroll gauge reflects the pane the wheel scrolled.
+func TestMouseWheelScrollsDetail(t *testing.T) {
+	// A short window forces the long diff to overflow its viewport.
+	h := sizedHarness(t, testfixture.LongMsg, 80, 24, false)
+	d := &h.app.detail
+	if d.view.ContentRows() <= d.view.Height() {
+		t.Skipf("fixture diff (%d rows) fits the viewport (%d); nothing to scroll",
+			d.view.ContentRows(), d.view.Height())
+	}
+	h.press("3") // focus the detail pane: the gauge is the detail's now
+	before := d.view.Offset()
+
+	m, _ := h.app.Update(tea.MouseWheelMsg{X: 60, Y: 20, Button: tea.MouseWheelDown})
+	h.app = h.model(m)
+	if got := h.app.detail.view.Offset(); got <= before {
+		t.Errorf("wheel-down offset = %d, want > %d", got, before)
+	}
+
+	m, _ = h.app.Update(tea.MouseWheelMsg{X: 60, Y: 20, Button: tea.MouseWheelUp})
+	h.app = h.model(m)
+	if got := h.app.detail.view.Offset(); got != before {
+		t.Errorf("wheel-up offset = %d, want back to %d", got, before)
+	}
+}
+
 // ptr is a small helper for unifiedLine's pointer parameter.
 func ptr[T any](v T) *T { return &v }
 

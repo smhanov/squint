@@ -1,6 +1,7 @@
 package model
 
 import (
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -122,6 +123,9 @@ func (a App) updateMouse(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	}
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
+		if os.Getenv("SQUINT_DEBUG") != "" {
+			println("squint: wheel at", msg.X, msg.Y)
+		}
 		m, cmd := a.mouseWheel(msg)
 		return m, cmd, true
 	case tea.MouseClickMsg:

@@ -7,10 +7,10 @@ parts of the source they changed: commit list, changed files, and a
 syntax-highlighted diff in one screen — navigable by keyboard and mouse.
 Because sometimes you have to squint at what the machine committed.
 
-![squint demo](docs/demo.gif)
+![squint demo](demo/demo.gif)
 
-<!-- TODO: record docs/demo.gif with `vhs demo/demo.tape` (needs the vhs
-     binary + ffmpeg); the tape is committed and the GIF is pending. -->
+The demo is generated from `demo/demo.tape` with
+[vhs](https://github.com/charmbracelet/vhs) (plus ffmpeg).
 
 ## Try it
 
@@ -62,7 +62,7 @@ golangci-lint run
 Golden-frame tests snapshot the rendered UI under `testdata/golden/`;
 rewrite them deliberately with
 `go test ./internal/model -run TestGoldenFrames -update`.
-The demo GIF is generated from `demo/demo.tape` with
+The demo GIF is regenerated from `demo/demo.tape` with
 [vhs](https://github.com/charmbracelet/vhs).
 
 ## License
