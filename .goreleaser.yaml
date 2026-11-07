@@ -3,9 +3,11 @@
 # CGO_ENABLED=0 keeps every artifact a self-contained static binary; the
 # Linux builds are static and therefore run unchanged on both glibc and
 # musl systems, and `go install` works from the tagged module.
-# The Homebrew tap and scoop bucket updates engage automatically once
-# the HOMEBREW_TAP_GITHUB_TOKEN / SCOOP_GITHUB_TOKEN secrets exist
-# (fine-grained PATs with push access to the smhanov tap/bucket).
+# The scoop bucket update engages automatically once the
+# SCOOP_GITHUB_TOKEN secret exists. The Homebrew formula is updated
+# manually per release (bump version + source sha256 in the tap): a
+# source-building formula is intentional, because macOS 26 stalls
+# first launches of poured ad-hoc binaries at dyld.
 version: 2
 
 project_name: squint
@@ -51,17 +53,7 @@ changelog:
       - "^test:"
       - "^chore:"
 
-homebrew_casks:
-  - name: squint
-    repository:
-      owner: smhanov
-      name: homebrew-tap
-    homepage: "https://github.com/smhanov/squint"
-    description: "Review what your LLM just committed, in a terminal UI"
-    license: MIT
-    binaries:
-      - squint
-    skip_upload: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" | eq "" }}'
+homebrew_casks: []
 
 scoops:
   - repository:

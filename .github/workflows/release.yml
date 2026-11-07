@@ -32,8 +32,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tap/bucket updates engage when these secrets exist
-          # (fine-grained PATs with push access to smhanov/homebrew-tap
-          # and smhanov/scoop-bucket); goreleaser skips them otherwise.
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Scoop bucket updates engage when this secret exists (a
+          # fine-grained PAT with push access to smhanov/scoop-bucket);
+          # goreleaser skips it otherwise. The Homebrew formula in
+          # smhanov/homebrew-tap is bumped manually per release.
           SCOOP_GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
