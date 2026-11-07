@@ -56,30 +56,31 @@ func TestWatcherUpdatesList(t *testing.T) {
 		app = next.(App)
 		run(cmd)
 	}
-	// Drain the initial loads: wait for the first message (fixture
-	// setup plus git can be slow on CI runners), then keep draining
-	// until a short quiet period says the loads are done.
-	drain := func() {
-		first := true
+	// Drain the initial loads: wait until the commit list has actually
+	// landed (fixture setup plus git can be slow on CI runners), then
+	// a short quiet period collects the rest (status, …).
+	drain := func(wantCommits bool) {
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
+			if wantCommits && len(app.commits) > 0 {
+				break
+			}
 			select {
 			case msg := <-msgs:
 				handle(msg)
-				first = false
 			case <-time.After(50 * time.Millisecond):
-				if first {
-					continue // nothing yet: keep waiting
+				if !wantCommits {
+					return
 				}
-				return
 			}
 		}
 	}
 	run(app.Init()) // the Batch unwraps on the channel; leaves run in goroutines
-	drain()
+	drain(true)
 	if len(app.commits) == 0 {
 		t.Fatal("initial commit list did not load")
 	}
+	drain(false)
 	before := len(app.commits)
 	selected := app.selectedHash
 	if selected != app.commits[0].Hash {
