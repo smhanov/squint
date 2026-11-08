@@ -1,6 +1,6 @@
 [90m╭─ commits (6) ────────────────────────────────────────────╮[m[90m╭─ files (Δ 1) ────────────────────────────────────────────╮[m
-[90m│[m[1m[35m◆[m bddd99f 54m Merge branch 'feature' (merge) (HEAD)       [m[90m│[m[90m│[m[7m[32mA[m main-only.txt                                           [m[90m│[m
-[90m│[m[7m[34m●[m a724605 55m Add main file                               [m[90m│[m[90m│[m                                                          [90m│[m
+[90m│[m[1m[35m◆[m bddd99f 54m Merge branch 'feature' (merge) (HEAD)       [m[90m│[m[90m│[m[7;32mA[m[7m main-only.txt                                           [m[90m│[m
+[90m│[m[7;34m●[m[7m a724605 55m Add main file                               [m[90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m 2c5e453 56m Main edit                                   [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m c6503d4 57m Add feature file                            [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m 872f66c 58m Feature edit                                [90m│[m[90m│[m                                                          [90m│[m

@@ -1,6 +1,6 @@
 [90m╭─ commits (5) ────────────────────────────────────────────╮[m[90m╭─ files (Δ 1) ────────────────────────────────────────────╮[m
-[90m│[m[1m[34m●[m 06b1788 55m Add logo, drop notes, settle script … (HEAD)[m[90m│[m[90m│[m[7m[34mR[m src/renderer/render.go → src/renderer/canvas.go         [m[90m│[m
-[90m│[m[7m[34m●[m f378a3d 56m Rename render.go to canvas.go               [m[90m│[m[90m│[m                                                          [90m│[m
+[90m│[m[1m[34m●[m 06b1788 55m Add logo, drop notes, settle script … (HEAD)[m[90m│[m[90m│[m[7;34mR[m[7m src/renderer/render.go → src/renderer/canvas.go         [m[90m│[m
+[90m│[m[7;34m●[m[7m f378a3d 56m Rename render.go to canvas.go               [m[90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m d871cef 57m Add renderer and run script                 [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m 37c889b 58m Fix lane flicker on reload                  [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m 3042963 59m Initial commit                              [90m│[m[90m│[m                                                          [90m│[m
