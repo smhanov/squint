@@ -51,11 +51,19 @@ func fileRow(e git.FileEntry, selected bool, width int, ascii bool) string {
 	if room := width - 2; ansi.StringWidth(path) > room {
 		path = ansi.Truncate(path, max(1, room), "…")
 	}
-	row := statusStyle(e.Status).Render(string(e.Status)) + " " + path
+	letter := string(e.Status)
 	if selected {
-		row = ui.StyleReverse.Render(padTo(row, width))
+		// As in commitRow: the letter and the text each carry the
+		// selection attributes so the highlight spans the whole row and
+		// the letter keeps its color inside it.
+		plain := " " + path
+		if lipgloss.Width(letter)+lipgloss.Width(plain) < width {
+			plain = padTo(plain, width-lipgloss.Width(letter))
+		}
+		return segStyle(statusStyle(e.Status), true, false).Render(letter) +
+			ui.StyleReverse.Render(plain)
 	}
-	return row
+	return statusStyle(e.Status).Render(letter) + " " + path
 }
 
 // abbrev shortens a full object hash to the conventional 7 characters.

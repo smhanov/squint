@@ -777,9 +777,7 @@ func TestFileRows(t *testing.T) {
 
 	sel := git.FileEntry{Status: 'M', Path: "x.go"}
 	row = fileRow(sel, true, 40, false)
-	if !strings.Contains(row, "\x1b[7m") {
-		t.Error("selected file row is not reverse video")
-	}
+	assertFullHighlight(t, "selected file row", row, 40, false)
 }
 
 // Commit rows: node glyph, hash, age, subject, HEAD/merge markers,
@@ -810,9 +808,7 @@ func TestCommitRows(t *testing.T) {
 	}
 
 	row = app.commitRow(&head, true, 60)
-	if !strings.Contains(row, "\x1b[7m") {
-		t.Error("selected row is not reverse video")
-	}
+	assertFullHighlight(t, "selected row", row, 60, true)
 
 	long := git.Commit{Abbrev: "f0e1d2c", At: now, Subject: strings.Repeat("word ", 40)}
 	row = app.commitRow(&long, false, 60)

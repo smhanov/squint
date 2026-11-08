@@ -69,20 +69,42 @@ func (a App) commitRow(c *git.Commit, selected bool, width int) string {
 	}
 	subject := ansi.Truncate(c.Subject, max(0, subjW), "…")
 
+	if selected {
+		// The highlight must cover the whole row, so each segment — the
+		// colored glyph included — carries the selection attributes of
+		// its own. A single reverse style around the assembled row stops
+		// at the glyph's embedded reset, highlighting the glyph only.
+		// The text (and its trailing padding) forms the second segment.
+		plain := " " + c.Abbrev + " " + padTo(age, 3) + " " + subject + marker
+		if lipgloss.Width(glyph)+lipgloss.Width(plain) < width {
+			plain = padTo(plain, width-lipgloss.Width(glyph))
+		}
+		return segStyle(gStyle, true, c.IsHead).Render(glyph) +
+			segStyle(lipgloss.NewStyle(), true, c.IsHead).Render(plain)
+	}
+
 	row := gStyle.Render(glyph) + " " + c.Abbrev +
 		" " + padTo(age, 3) + " " + subject + marker
 	if lipgloss.Width(row) < width {
 		row = padTo(row, width)
 	}
-	switch {
-	case selected && c.IsHead:
-		row = ui.StyleReverse.Render(ui.StyleBold.Render(row))
-	case selected:
-		row = ui.StyleReverse.Render(row)
-	case c.IsHead:
+	if c.IsHead {
 		row = ui.StyleBold.Render(row)
 	}
 	return row
+}
+
+// segStyle layers the row-selection attributes onto one row segment's
+// base style: reverse video when selected, plus bold on the selected
+// HEAD row; unselected segments pass through unchanged.
+func segStyle(base lipgloss.Style, selected, bold bool) lipgloss.Style {
+	if !selected {
+		return base
+	}
+	if bold {
+		return base.Bold(true).Reverse(true)
+	}
+	return base.Reverse(true)
 }
 
 // rebuildCommitsLines renders every row and pins the cursor on screen.
