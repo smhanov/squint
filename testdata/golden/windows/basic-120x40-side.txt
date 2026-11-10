@@ -1,5 +1,5 @@
 [90m╭─ commits (5) ────────────────────────────────────────────╮[m[90m╭─ files (Δ 1) ────────────────────────────────────────────╮[m
-[90m│[m[1m[34m●[m 06b1788 55m Add logo, drop notes, settle script … (HEAD)[m[90m│[m[90m│[m[7;33mM[m[7m src/app.go                                              [m[90m│[m
+[90m│[m[1;34m●[m[1m 06b1788 55m Add logo, drop notes, settle script … (HEAD)[m[90m│[m[90m│[m[7;33mM[m[7m src/app.go                                              [m[90m│[m
 [90m│[m[34m●[m f378a3d 56m Rename render.go to canvas.go               [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[34m●[m d871cef 57m Add renderer and run script                 [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m[7;34m●[m[7m 37c889b 58m Fix lane flicker on reload                  [m[90m│[m[90m│[m                                                          [90m│[m
