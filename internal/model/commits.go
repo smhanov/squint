@@ -42,7 +42,8 @@ func relAge(t, now time.Time) string {
 
 // commitRow renders one row of the commit list. Merge commits show ◆ and
 // a (merge) marker; the HEAD row is bold with a (HEAD) marker; the
-// selected row is reverse video (spec §7.5).
+// selected row is reverse video (spec §7.5). Row state — selection and
+// the HEAD emphasis — spans the whole row width.
 func (a App) commitRow(c *git.Commit, selected bool, width int) string {
 	glyph, gStyle := "●", ui.StyleDot
 	marker := ""
@@ -83,28 +84,40 @@ func (a App) commitRow(c *git.Commit, selected bool, width int) string {
 			segStyle(lipgloss.NewStyle(), true, c.IsHead).Render(plain)
 	}
 
+	if c.IsHead {
+		// The HEAD emphasis is row state too, so it uses the same
+		// two-segment assembly as the selection: a bold wrap around
+		// the assembled row dies at the glyph's embedded reset,
+		// leaving only the dot bold. The text (and its trailing
+		// padding) forms the second segment.
+		plain := " " + c.Abbrev + " " + padTo(age, 3) + " " + subject + marker
+		if lipgloss.Width(glyph)+lipgloss.Width(plain) < width {
+			plain = padTo(plain, width-lipgloss.Width(glyph))
+		}
+		return segStyle(gStyle, false, true).Render(glyph) +
+			segStyle(lipgloss.NewStyle(), false, true).Render(plain)
+	}
+
 	row := gStyle.Render(glyph) + " " + c.Abbrev +
 		" " + padTo(age, 3) + " " + subject + marker
 	if lipgloss.Width(row) < width {
 		row = padTo(row, width)
 	}
-	if c.IsHead {
-		row = ui.StyleBold.Render(row)
-	}
 	return row
 }
 
-// segStyle layers the row-selection attributes onto one row segment's
-// base style: reverse video when selected, plus bold on the selected
-// HEAD row; unselected segments pass through unchanged.
+// segStyle layers the row-state attributes onto one row segment's base
+// style: reverse video when selected, bold when bold — composed when
+// both apply. Selection and the HEAD emphasis are independent row
+// states, so each segment carries whichever of the two it needs.
 func segStyle(base lipgloss.Style, selected, bold bool) lipgloss.Style {
-	if !selected {
-		return base
+	if selected {
+		base = base.Reverse(true)
 	}
 	if bold {
-		return base.Bold(true).Reverse(true)
+		base = base.Bold(true)
 	}
-	return base.Reverse(true)
+	return base
 }
 
 // rebuildCommitsLines renders every row and pins the cursor on screen.

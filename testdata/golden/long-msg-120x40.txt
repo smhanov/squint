@@ -1,5 +1,5 @@
 [90m╭─ commits (2) ────────────────────────────────────────────╮[m[90m╭─ files (Δ 1) ────────────────────────────────────────────╮[m
-[90m│[m[1m[34m●[m c549b01 58m Refactor the ingest pipeline (HEAD)         [m[90m│[m[90m│[m[7;32mA[m[7m pipeline.go                                             [m[90m│[m
+[90m│[m[1;34m●[m[1m c549b01 58m Refactor the ingest pipeline (HEAD)         [m[90m│[m[90m│[m[7;32mA[m[7m pipeline.go                                             [m[90m│[m
 [90m│[m[7;34m●[m[7m 0870a7e 59m Set up ingest package                       [m[90m│[m[90m│[m                                                          [90m│[m
 [90m│[m                                                          [90m│[m[90m│[m                                                          [90m│[m
 [90m│[m                                                          [90m│[m[90m│[m                                                          [90m│[m

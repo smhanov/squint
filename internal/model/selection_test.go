@@ -100,6 +100,26 @@ func assertFullHighlight(t *testing.T, name, row string, width int, bold bool) {
 	}
 }
 
+// assertFullBold checks that every visible cell of the row sits inside
+// a bold span and that the row is exactly width cells wide, trailing
+// padding included — the whole row carries the HEAD emphasis, with no
+// unstyled gap (the SGR-walk mirror of assertFullHighlight).
+func assertFullBold(t *testing.T, name, row string, width int) {
+	t.Helper()
+	cells := rowCells(t, row)
+	if len(cells) == 0 {
+		t.Fatalf("%s: row %q has no visible cells", name, row)
+	}
+	for i, c := range cells {
+		if !c.bold {
+			t.Fatalf("%s: visible cell %d is outside the bold span: %q", name, i, row)
+		}
+	}
+	if got := lipgloss.Width(row); got != width {
+		t.Fatalf("%s: width %d, want %d — trailing padding must be inside the bold span", name, got, width)
+	}
+}
+
 // Selected commit rows: the highlight covers the whole row and the node
 // glyph keeps its color inside it; selected+HEAD composes bold+reverse
 // on every cell. The raw-byte assertions pin the exact composed spans.
@@ -157,9 +177,12 @@ func TestSelectedFileRowHighlight(t *testing.T) {
 	}
 }
 
-// Unselected rows must render byte-identically to the pre-change
-// renderer: HEAD rows bold-wrapped over the padded row, plain and merge
-// rows raw. The exact bytes are pinned here verbatim.
+// Unselected rows: plain, merge, and file rows must render
+// byte-identically to the pre-change renderer, pinned here verbatim.
+// The HEAD row is deliberately re-pinned to its new full-width bold
+// form: each segment (glyph, then text through the trailing padding)
+// carries its own bold, so the SGR walk must find every cell bold —
+// the old single bold wrap died at the glyph's embedded reset.
 func TestUnselectedRowBytesPinned(t *testing.T) {
 	now := pinnedNow
 	app := New(Config{RepoName: "demo", HasCommits: true, Now: func() time.Time { return now }})
@@ -170,11 +193,13 @@ func TestUnselectedRowBytesPinned(t *testing.T) {
 	plain := git.Commit{Hash: "333", Abbrev: "b7c8d9e", At: now.Add(-3 * time.Hour),
 		Subject: "Small fix"}
 
-	want := "\x1b[1m\x1b[34m●\x1b[m a1b2c3d 2m  Fix lane flicker on reload (HEAD)" +
+	row := app.commitRow(&head, false, 60)
+	want := "\x1b[1;34m●\x1b[m\x1b[1m a1b2c3d 2m  Fix lane flicker on reload (HEAD)" +
 		strings.Repeat(" ", 13) + "\x1b[m"
-	if got := app.commitRow(&head, false, 60); got != want {
+	if got := row; got != want {
 		t.Errorf("unselected HEAD row:\n got %q\nwant %q", got, want)
 	}
+	assertFullBold(t, "unselected HEAD row", row, 60)
 
 	want = "\x1b[35m◆\x1b[m e4f5a6b 14m Merge branch 'feature' (merge)" + strings.Repeat(" ", 16)
 	if got := app.commitRow(&merge, false, 60); got != want {
